@@ -1,0 +1,57 @@
+{
+  "name": "velora-valley",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Velora Valley \u2014 premium dry fruits, nuts, dates & seeds by Anantha Food Products",
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "vercel-build": "prisma generate && prisma db push --skip-generate && tsx prisma/seed.ts && next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "db:push": "prisma db push",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:setup": "prisma db push && tsx prisma/seed.ts",
+    "test:api": "tsx scripts/smoke-test.ts",
+    "test:ui": "node scripts/e2e-ui.mjs",
+    "db:cleanup-tests": "tsx scripts/cleanup-test-data.ts",
+    "postinstall": "prisma generate"
+  },
+  "dependencies": {
+    "@gsap/react": "2.1.2",
+    "@prisma/client": "5.22.0",
+    "clsx": "2.1.1",
+    "framer-motion": "11.18.2",
+    "gsap": "3.13.0",
+    "lenis": "1.1.20",
+    "next": "^16.4.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "server-only": "^0.0.1",
+    "sharp": "^0.35.5",
+    "zod": "^4.6.7",
+    "zustand": "5.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "20.17.10",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "autoprefixer": "10.4.20",
+    "playwright-core": "1.48.2",
+    "postcss": "8.4.49",
+    "prisma": "5.22.0",
+    "tailwindcss": "3.4.17",
+    "tsx": "4.19.2",
+    "typescript": "5.7.2"
+  },
+  "allowScripts": {
+    "@prisma/client@5.22.0": true,
+    "@prisma/engines@5.22.0": true,
+    "esbuild@0.23.1": true,
+    "prisma@5.22.0": true,
+    "sharp@0.33.5": true
+  },
+  "engines": {
+    "node": "24.x"
+  }
+}

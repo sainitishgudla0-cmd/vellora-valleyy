@@ -1,0 +1,11 @@
+# never upload local secrets, databases or build output
+.env
+.env.*
+!.env.example
+prisma/*.db
+prisma/*.db-journal
+.next
+node_modules
+.e2e-screenshots
+*.tsbuildinfo
+.vercel

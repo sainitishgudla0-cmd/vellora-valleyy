@@ -1,0 +1,27 @@
+node_modules
+.next
+out
+*.tsbuildinfo
+.env
+.env.local
+prisma/*.db
+prisma/*.db-journal
+.e2e-screenshots
+.env.*
+!.env.example
+.vercel
+.env*
+
+# --- secrets & generated files (added for GitHub backup) ---
+.env
+.env*
+!.env.example
+node_modules
+.next
+out
+.vercel
+*.tsbuildinfo
+*.log
+.DS_Store
+*.pem
+*.key

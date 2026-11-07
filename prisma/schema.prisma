@@ -1,0 +1,121 @@
+// Velora Valley data model (PostgreSQL — Neon via the Vercel integration).
+// DATABASE_URL          pooled connection used by the app at runtime
+// DATABASE_URL_UNPOOLED direct connection used by `prisma db push` / migrations
+// JSON-ish fields are stored as strings for portability.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+model Product {
+  id              String    @id @default(cuid())
+  slug            String    @unique
+  name            String
+  tagline         String
+  description     String
+  primaryCategory String
+  /// JSON array of category slugs
+  categories      String
+  /// JSON object of image paths (see src/data/types.ts ProductImages)
+  images          String
+  /// JSON array of short serving / usage suggestions
+  uses            String    @default("[]")
+  note            String?
+  featured        Boolean   @default(false)
+  active          Boolean   @default(true)
+  sortOrder       Int       @default(0)
+  variants        Variant[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model Variant {
+  id          String      @id @default(cuid())
+  sku         String      @unique // product barcode
+  label       String // e.g. "250g", "10 pieces (400g)"
+  weightGrams Int
+  /// selling price in paise
+  price       Int
+  /// brochure MRP in paise
+  mrp         Int
+  shelfLife   String
+  hsCode      String
+  image       String?
+  inStock     Boolean     @default(true)
+  sortOrder   Int         @default(0)
+  product     Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId   String
+  orderItems  OrderItem[]
+}
+
+model Order {
+  id                String      @id @default(cuid())
+  number            String      @unique
+  accessToken       String
+  /// pending_confirmation | awaiting_payment | confirmed | paid | dispatched | delivered | cancelled
+  status            String
+  /// cod | razorpay
+  paymentMethod     String
+  /// unpaid | paid | failed | refunded
+  paymentStatus     String      @default("unpaid")
+  customerName      String
+  email             String
+  phone             String
+  addressLine1      String
+  addressLine2      String?
+  city              String
+  state             String
+  pincode           String
+  notes             String?
+  subtotal          Int
+  deliveryFee       Int
+  total             Int
+  razorpayOrderId   String?     @unique
+  razorpayPaymentId String?
+  items             OrderItem[]
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+}
+
+model OrderItem {
+  id           String  @id @default(cuid())
+  order        Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId      String
+  variant      Variant @relation(fields: [variantId], references: [id])
+  variantId    String
+  productName  String
+  variantLabel String
+  sku          String
+  unitPrice    Int
+  quantity     Int
+  lineTotal    Int
+}
+
+model Enquiry {
+  id        String   @id @default(cuid())
+  /// contact | business
+  type      String
+  name      String
+  email     String
+  phone     String?
+  company   String?
+  city      String?
+  /// business interest, e.g. distributor | retail | bulk | horeca | export | franchise
+  interest  String?
+  message   String
+  /// new | in_progress | closed
+  status    String   @default("new")
+  createdAt DateTime @default(now())
+}
+
+model Subscriber {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  createdAt DateTime @default(now())
+}

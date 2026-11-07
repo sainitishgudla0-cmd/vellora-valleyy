@@ -1,0 +1,242 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ───────────────────────── Base ───────────────────────── */
+@layer base {
+  :root {
+    --header-h: 76px;
+    color-scheme: light;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+    overflow-x: clip;
+    scroll-padding-top: calc(var(--header-h) + 24px);
+  }
+  body {
+    @apply bg-cream font-mono text-forest antialiased;
+    font-size: 15px;
+    line-height: 1.6;
+    overflow-x: clip;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    @apply bg-gold text-forest-deep;
+  }
+  h1, h2, h3, h4 {
+    @apply font-display font-bold uppercase;
+    font-stretch: 75%;
+    font-variation-settings: "wdth" 75;
+    letter-spacing: -0.005em;
+  }
+  :focus-visible {
+    outline: 2.5px solid theme("colors.gold.DEFAULT");
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+  img {
+    -webkit-user-drag: none;
+  }
+}
+
+/* Lenis smooth scroll */
+html.lenis, html.lenis body { height: auto; }
+.lenis.lenis-smooth { scroll-behavior: auto !important; }
+.lenis.lenis-smooth [data-lenis-prevent] { overscroll-behavior: contain; }
+.lenis.lenis-stopped { overflow: hidden; }
+
+/* ───────────────────────── Typography helpers ───────────────────────── */
+@layer components {
+  .display {
+    @apply font-display font-bold uppercase;
+    font-variation-settings: "wdth" 75;
+  }
+  .eyebrow {
+    @apply font-mono text-[11px] font-medium uppercase tracking-[0.18em];
+  }
+  .serif-italic {
+    @apply font-serif italic;
+    font-variation-settings: "SOFT" 100, "WONK" 1;
+  }
+  .script {
+    @apply font-script;
+    line-height: 0.95;
+  }
+  .container-site {
+    @apply mx-auto w-full max-w-site px-4 sm:px-6 lg:px-10;
+  }
+}
+
+/* ───────────────────────── Buttons ───────────────────────── */
+@layer components {
+  .btn {
+    --btn-bg: theme("colors.gold.DEFAULT");
+    --btn-bg-hover: theme("colors.gold.light");
+    --btn-fg: theme("colors.forest.deep");
+    @apply relative inline-flex select-none items-center justify-center gap-2 overflow-hidden whitespace-nowrap px-6 py-3 font-serif text-[17px] italic leading-none;
+    font-variation-settings: "SOFT" 100, "WONK" 1;
+    color: var(--btn-fg);
+    background: var(--btn-bg);
+    clip-path: polygon(1.5% 6%, 99% 0, 100% 92%, 0.5% 100%);
+    transition: background-color 0.35s ease, transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .btn:hover { background: var(--btn-bg-hover); transform: translateY(-2px) rotate(-0.6deg); }
+  .btn:active { transform: translateY(0) scale(0.98); }
+  .btn[disabled] { @apply cursor-not-allowed opacity-50; transform: none; }
+  .btn-forest {
+    --btn-bg: theme("colors.forest.DEFAULT");
+    --btn-bg-hover: theme("colors.forest.logo");
+    --btn-fg: theme("colors.cream.DEFAULT");
+  }
+  .btn-cream {
+    --btn-bg: theme("colors.cream.light");
+    --btn-bg-hover: #fff;
+    --btn-fg: theme("colors.forest.DEFAULT");
+  }
+  .btn-lg { @apply px-8 py-4 text-[20px]; }
+  .btn-sm { @apply px-4 py-2.5 text-[15px]; }
+
+  /* rolling label: <span class="roll"><span data-text="Label">Label</span></span> */
+  .roll { @apply relative inline-block overflow-hidden align-bottom; }
+  .roll > span { @apply inline-block; transition: transform 0.5s cubic-bezier(0.76, 0, 0.24, 1); }
+  .roll > span::after {
+    content: attr(data-text);
+    @apply absolute left-0 top-full;
+  }
+  .group:hover .roll > span, .btn:hover .roll > span, .roll-host:hover .roll > span { transform: translateY(-100%); }
+
+  .link-underline {
+    background: linear-gradient(currentColor, currentColor) 0 100% / 0 1.5px no-repeat;
+    transition: background-size 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .link-underline:hover, .link-underline[aria-current="page"] { background-size: 100% 1.5px; }
+}
+
+/* ───────────────────────── Ornaments ───────────────────────── */
+@layer components {
+  /* Perforated photo "stamp" frame. Wrap in .drop to get a shadow. */
+  .stamp {
+    --r: 6px;
+    padding: calc(2 * var(--r) + 4px);
+    background: #fffdf8;
+    -webkit-mask:
+      radial-gradient(var(--r), #0000 97%, #000) round calc(-1.5 * var(--r)) calc(-1.5 * var(--r)) / calc(3 * var(--r)) calc(3 * var(--r)),
+      linear-gradient(#000 0 0) no-repeat 50% / calc(100% - 3 * var(--r)) calc(100% - 3 * var(--r));
+    mask:
+      radial-gradient(var(--r), #0000 97%, #000) round calc(-1.5 * var(--r)) calc(-1.5 * var(--r)) / calc(3 * var(--r)) calc(3 * var(--r)),
+      linear-gradient(#000 0 0) no-repeat 50% / calc(100% - 3 * var(--r)) calc(100% - 3 * var(--r));
+  }
+  .drop { filter: drop-shadow(0 18px 22px rgba(20, 30, 12, 0.28)); }
+  .drop-sm { filter: drop-shadow(0 8px 12px rgba(20, 30, 12, 0.22)); }
+
+  /*
+   * Concave-cornered frame. Nest layers and set --i (inset from the outermost
+   * edge) so every corner stays concentric. --n = outer notch radius.
+   */
+  .notch {
+    --n: 22px;
+    --i: 0px;
+    --R: calc(var(--n) + var(--i));
+    -webkit-mask:
+      radial-gradient(circle var(--R) at calc(-1 * var(--i)) calc(-1 * var(--i)), #0000 98%, #000) top left / 51% 51% no-repeat,
+      radial-gradient(circle var(--R) at calc(100% + var(--i)) calc(-1 * var(--i)), #0000 98%, #000) top right / 51% 51% no-repeat,
+      radial-gradient(circle var(--R) at calc(-1 * var(--i)) calc(100% + var(--i)), #0000 98%, #000) bottom left / 51% 51% no-repeat,
+      radial-gradient(circle var(--R) at calc(100% + var(--i)) calc(100% + var(--i)), #0000 98%, #000) bottom right / 51% 51% no-repeat;
+    mask:
+      radial-gradient(circle var(--R) at calc(-1 * var(--i)) calc(-1 * var(--i)), #0000 98%, #000) top left / 51% 51% no-repeat,
+      radial-gradient(circle var(--R) at calc(100% + var(--i)) calc(-1 * var(--i)), #0000 98%, #000) top right / 51% 51% no-repeat,
+      radial-gradient(circle var(--R) at calc(-1 * var(--i)) calc(100% + var(--i)), #0000 98%, #000) bottom left / 51% 51% no-repeat,
+      radial-gradient(circle var(--R) at calc(100% + var(--i)) calc(100% + var(--i)), #0000 98%, #000) bottom right / 51% 51% no-repeat;
+  }
+
+  /* Hexagon badge (pointed left/right) */
+  .hex {
+    --h: 44px;
+    clip-path: polygon(var(--h) 0, calc(100% - var(--h)) 0, 100% 50%, calc(100% - var(--h)) 100%, var(--h) 100%, 0 50%);
+  }
+  /* Octagon */
+  .oct {
+    clip-path: polygon(29.3% 0, 70.7% 0, 100% 29.3%, 100% 70.7%, 70.7% 100%, 29.3% 100%, 0 70.7%, 0 29.3%);
+  }
+  /* Scalloped tile (marquee / labels) */
+  .tile-notch {
+    --n: 12px;
+    -webkit-mask:
+      radial-gradient(circle var(--n) at 0 50%, #0000 98%, #000) left / 51% 100% no-repeat,
+      radial-gradient(circle var(--n) at 100% 50%, #0000 98%, #000) right / 51% 100% no-repeat;
+    mask:
+      radial-gradient(circle var(--n) at 0 50%, #0000 98%, #000) left / 51% 100% no-repeat,
+      radial-gradient(circle var(--n) at 100% 50%, #0000 98%, #000) right / 51% 100% no-repeat;
+  }
+
+  /* Two-row dashed "furrow" edge between sections */
+  .edge-dash {
+    --c: theme("colors.forest.DEFAULT");
+    --w: 38px;
+    height: 16px;
+    background:
+      repeating-linear-gradient(90deg, var(--c) 0 var(--w), transparent var(--w) calc(var(--w) * 2)) 0 0 / 100% 8px no-repeat,
+      repeating-linear-gradient(90deg, transparent 0 var(--w), var(--c) var(--w) calc(var(--w) * 2)) 0 8px / 100% 8px no-repeat;
+  }
+  .edge-dash-single {
+    --c: theme("colors.forest.DEFAULT");
+    --w: 38px;
+    height: 9px;
+    background: repeating-linear-gradient(90deg, var(--c) 0 var(--w), transparent var(--w) calc(var(--w) * 2));
+  }
+
+  /* Subtle paper grain for coloured sections */
+  .grain { position: relative; isolation: isolate; }
+  .grain::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.07;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+
+  .input {
+    @apply w-full border-0 border-b-[1.5px] border-forest/30 bg-transparent px-0 py-2.5 font-mono text-[15px] text-forest outline-none transition-colors placeholder:text-forest/40 focus:border-forest;
+  }
+  .input[aria-invalid="true"] { @apply border-red-700; }
+  .label { @apply eyebrow mb-1 block text-forest/70; }
+  .field-error { @apply mt-1 text-[12px] text-red-700; }
+}
+
+@layer utilities {
+  .text-balance { text-wrap: balance; }
+  .text-pretty { text-wrap: pretty; }
+  .scrollbar-none { scrollbar-width: none; }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+  .marquee-pause:hover .animate-marquee { animation-play-state: paused; }
+}
+
+/* Elements animated in by JS start hidden only when JS + motion are available */
+.js [data-reveal] { opacity: 0; }
+.js [data-split] { visibility: hidden; }
+.js [data-hero-anim] { opacity: 0; }
+.js [data-hero-headline] { visibility: hidden; }
+.motion-fallback [data-hero-headline] { visibility: visible; }
+.js [data-hero-panel] { clip-path: inset(6% 4% 6% 4% round 28px); }
+.motion-fallback [data-hero-anim] { opacity: 1; }
+.motion-fallback [data-hero-panel] { clip-path: none; }
+@media (prefers-reduced-motion: reduce) {
+  .js [data-hero-anim] { opacity: 1 !important; }
+  .js [data-hero-panel] { clip-path: none !important; }
+}
+/* safety net: if scripts never initialise, show everything */
+.motion-fallback [data-reveal]:not([data-motion-ready]) { opacity: 1; }
+.motion-fallback [data-split]:not([data-motion-ready]) { visibility: visible; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .js [data-reveal] { opacity: 1 !important; transform: none !important; }
+  .js [data-split] { visibility: visible !important; }
+}
