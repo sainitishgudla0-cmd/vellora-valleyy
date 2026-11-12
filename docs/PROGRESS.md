@@ -3,15 +3,15 @@
 _Read this first in a new session. Keep it under ~80 lines. Scope and AC per task: `BACKEND-ROADMAP.md`._
 
 ## Current
-- **Milestone:** M2 in progress on `backend/m2-payments`. M2-T1 and M2-T2 done. T3+ need approval.
-- **Branch:** M1 is integrated: `backend/development` = `104d6c2` (M2-T1 integrated by fast-forward, no PR workflow). CI on it is green (run 43140864217). `main` = `55aa848`, untouched.
+- **Milestone:** M2 in progress on `backend/m2-payments`. M2-T1..T3 done. T4+ need approval.
+- **Branch:** M1 is integrated: `backend/development` = `3d3f00c` (M2-T2 integrated by fast-forward, no PR workflow). CI on it is green (run 43142853847). `main` = `55aa848`, untouched.
 - **Last verified:** 2026-11-11, `npm run verify:full` on throwaway Postgres 16 (127.0.0.1): all gates green. See the M1 evidence below.
 
 ## Next up
 | Task | Status | Notes |
 |---|---|---|
-| M2-T3 `Payment` model + providers | proposed (needs approval) | next; ratchet in `state-machine-ratchet.test.ts` is lowered by T5/T6; admin may not mark payments paid until T6 designs staff reference capture + audited confirmation |
-| M2-T4..T6 | proposed | see `BACKEND-ROADMAP.md` M2 |
+| M2-T4 mock flow | proposed (needs approval) | next; adds `Order.paymentMode`, `POST /api/payments/mock/confirm`, MOCK label copy (copy needs user approval) |
+| M2-T5..T6 | proposed | see `BACKEND-ROADMAP.md` M2 |
 
 ## Blockers / open items
 1. **Preview DB isolation unverified.** Vercel project settings weren't accessible (local CLI account can't see the production team; Vercel MCP unauthorised). GitHub shows no Vercel deployments or statuses for this repo, so previews don't appear to be Git-triggered. M1 builds are DB-write-free regardless; reads during a preview build would still use whatever `DATABASE_URL` preview has. Owner: user (Vercel dashboard).
@@ -22,6 +22,10 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 6. Local Node is 20.19.6; project targets 24 (`.nvmrc`, CI uses 24).
 
 ## Done
+### M2-T3 — Payment model + providers (ADR 0007)
+- `src/lib/payments/providers/{types,request-only,mock,razorpay,index}.ts`; `payments.ts` is now a facade (old exports unchanged, adds `currentPaymentProvider()`); `payments/records.ts` `recordPaymentAttempt`. request_only can never verify a payment (no automatic offline confirmation); mock is labelled, offline, and its factory refuses anything but mode=mock in development/test; razorpay is the old code moved (same request/HMAC). Additive migration `20261112025437_payment_attempts` (`Payment`, `PaymentProvider`, `PaymentMode`). No route or frontend change (routes move in T5).
+- Tests: `payment-providers.test.ts` and `payments-facade.test.ts` (provider behaviour, mock barriers, config selection, fail-closed, no secret in client payload), `integration/payment-records.test.ts` (attempt rows, unique `providerPaymentId`, enum rejection, cascade).
+- **Evidence (2026-11-11, throwaway Postgres 16.13, fresh DB):** `verify:full` + `VERIFY_UI=1` → typecheck ✓ · unit 202/202 ✓ · env ✓ · migrate deploy ✓ · schema diff none ✓ · integration 34/34 ✓ · build ✓ · smoke 41/0 ✓ · UI 51/0 ✓.
 ### M2-T2 — order state machine + event history (ADR 0006)
 - `src/lib/orders/state-machine.ts`: order and payment transition tables, actor rules (`paid` only gateway/system; no admin or automatic offline confirmation), reason rules, `transitionOrder` = conditional `updateMany` + `OrderEvent` insert in one transaction; expected failures returned as codes (`stale_state`, `invalid_transition`, …). Migration `20261112022916_order_events` is additive (`OrderEvent`, `OrderActorType`). No route changes yet (T5/T6); `state-machine-ratchet.test.ts` pins the 3 legacy writer files by count so no new direct writer can appear.
 - Tests: `state-machine.test.ts` (full 7×7 order and 4×4 payment matrices, actor/reason rules, mocked-tx behaviour), ratchet, `integration/state-machine.test.ts` (COD flow stays unpaid, gateway paid, stale/not_found, 8-way race → 1 winner/1 event, cancel-vs-dispatch race, cascade cleanup). Fixed the T1 drift test to apply later migrations.

@@ -1,9 +1,11 @@
 import "server-only";
-import crypto from "node:crypto";
 import { PaymentConfigError, resolvePaymentConfig, type PaymentConfig } from "./env/payment-config";
+import { providerForConfig, type PaymentProvider } from "./payments/providers";
+import { createRazorpayOrder as rpCreateOrder, verifyRazorpaySignatureWith } from "./payments/providers/razorpay";
 
 /**
- * Razorpay integration (optional). Online payment is only offered when PAYMENT_MODE is
+ * Payments facade: configuration plus the providers in ./payments/providers (request_only, mock, razorpay).
+ * Razorpay is optional. Online payment is only offered when PAYMENT_MODE is
  * razorpay_test / razorpay_live AND the configuration passes validation (src/lib/env/payment-config.ts).
  * An invalid configuration fails closed: online payments are disabled and the error is logged.
  * Nothing here ever marks an order paid without a verified Razorpay signature.
@@ -29,27 +31,21 @@ export function razorpayConfig() {
 
 export const onlinePaymentsEnabled = () => safePaymentConfig()?.onlinePayments === true;
 
+/** The provider for the current PAYMENT_MODE, or null when the configuration is invalid (fails closed). */
+export function currentPaymentProvider(): PaymentProvider | null {
+  const cfg = safePaymentConfig();
+  return cfg ? providerForConfig(cfg) : null;
+}
+
+// Backwards-compatible helpers used by the existing routes (moved onto providers in M2-T5).
 export async function createRazorpayOrder(amountPaise: number, receipt: string) {
   const cfg = razorpayConfig();
   if (!cfg) throw new Error("Online payments are not configured");
-  const res = await fetch("https://api.razorpay.com/v1/orders", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: "Basic " + Buffer.from(`${cfg.keyId}:${cfg.keySecret}`).toString("base64"),
-    },
-    body: JSON.stringify({ amount: amountPaise, currency: "INR", receipt }),
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`Razorpay order creation failed (${res.status})`);
-  return (await res.json()) as { id: string; amount: number; currency: string };
+  return rpCreateOrder(cfg, amountPaise, receipt);
 }
 
 export function verifyRazorpaySignature(orderId: string, paymentId: string, signature: string) {
   const cfg = razorpayConfig();
   if (!cfg) return false;
-  const expected = crypto.createHmac("sha256", cfg.keySecret).update(`${orderId}|${paymentId}`).digest("hex");
-  const a = Buffer.from(expected);
-  const b = Buffer.from(signature);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  return verifyRazorpaySignatureWith(cfg.keySecret, orderId, paymentId, signature);
 }

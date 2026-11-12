@@ -61,3 +61,6 @@ Write-capable test handshake. **`404` whenever `APP_ENV` resolves to production 
 
 ## Order state machine (M2-T2, ADR 0006)
 Internal module only; no HTTP contract changes yet. `OrderEvent` rows are written by `transitionOrder`. Routes are moved onto it in M2-T5/T6 (admin PATCH will then return `409` for invalid transitions).
+
+## Payment providers (M2-T3, ADR 0007)
+Internal modules only; no HTTP contract changes. `Payment` rows are not written by any route yet (M2-T5).

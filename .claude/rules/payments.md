@@ -1,6 +1,7 @@
 ---
 paths:
   - "src/lib/payments.ts"
+  - "src/lib/payments/**"
   - "src/lib/payment-*.ts"
   - "src/lib/env/payment-config.ts"
   - "src/app/api/payments/**"

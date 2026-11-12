@@ -101,8 +101,43 @@ model Order {
   razorpayPaymentId String?
   items             OrderItem[]
   events            OrderEvent[]
+  payments          Payment[]
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
+}
+
+/// Which integration handled a payment attempt (src/lib/payments/providers).
+enum PaymentProvider {
+  request_only
+  mock
+  razorpay
+}
+
+/// The PAYMENT_MODE a payment attempt was made under (ADR 0002). `mock` rows are never real money.
+enum PaymentMode {
+  mock
+  request_only
+  razorpay_test
+  razorpay_live
+}
+
+/// One payment attempt for an order. Amounts are integer paise.
+model Payment {
+  id                String          @id @default(cuid())
+  orderId           String
+  order             Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider          PaymentProvider
+  mode              PaymentMode
+  providerOrderId   String?
+  providerPaymentId String?         @unique
+  amount            Int
+  currency          String          @default("INR")
+  status            PaymentStatus   @default(unpaid)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([orderId])
+  @@index([providerOrderId])
 }
 
 /// Who initiated a status change (ADR 0006).
