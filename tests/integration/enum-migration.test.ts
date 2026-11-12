@@ -7,13 +7,16 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { assertDisposableDatabase } from "@/lib/env/test-safety";
 
 const target = assertDisposableDatabase(process.env, "enum migration rehearsal");
 const migrationsDir = path.join(process.cwd(), "prisma/migrations");
 const ENUM_DIR = fs.readdirSync(migrationsDir).find((d) => d.endsWith("_order_payment_enums"))!;
+// These tests build scratch databases and replay every migration; that grows with each milestone and was timing out at 5 s on CI (M3).
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
+
 const prismaCli = createRequire(import.meta.url).resolve("prisma/build/index.js");
 
 const admin = new PrismaClient();
