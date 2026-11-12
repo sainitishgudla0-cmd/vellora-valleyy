@@ -13,5 +13,5 @@ export async function GET(req: Request) {
   const q = shippingQuoteQuery.safeParse({ pincode: sp.get("pincode") ?? undefined, subtotal: sp.get("subtotal") ?? undefined });
   if (!q.success) return fail("Enter a valid 6-digit pincode", 422, { pincode: "Enter a valid 6-digit pincode" });
   const s = await quoteShipping(db, q.data.pincode, q.data.subtotal);
-  return json({ serviceable: s.serviceable, fee: s.fee, freeAboveSubtotal: s.freeAboveSubtotal });
+  return json({ serviceable: s.serviceable, fee: s.fee, freeAboveSubtotal: s.freeAboveSubtotal, ruleBased: !s.legacy });
 }

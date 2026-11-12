@@ -48,7 +48,7 @@ export async function POST(req: Request) {
     return respond(claim?.keyHash, ambiguousBody(order.number), 502);
   } catch (e) {
     if (e instanceof IdempotencyConflictError && claim) return fromStored(await lookupKey(claim.keyHash, claim.requestHash));
-    if (e instanceof OrderError) return fail(e.message, e.status);
+    if (e instanceof OrderError) return fail(e.message, e.status, e.fields);
     console.error("[orders] unexpected failure creating order"); // no error object: it may carry customer data
     return fail("Something went wrong while placing your order. Please try again.", 500);
   }

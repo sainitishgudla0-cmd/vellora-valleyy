@@ -29,8 +29,15 @@ async function main() {
   });
   const enquiries = await db.enquiry.deleteMany({ where: { OR: [{ name: { startsWith: "SMOKE TEST" } }, { email: { startsWith: "smoke." } }] } });
   const subs = await db.subscriber.deleteMany({ where: { email: { startsWith: "smoke." } } });
+  // browser-test shoppers and wholesale buyers (smoke.* addresses): their orders and quotes first, then accounts, price lists and the customers
+  const bizIds = (await db.businessAccount.findMany({ where: { contactEmail: { startsWith: "smoke." } }, select: { id: true } })).map((b) => b.id);
+  await db.order.deleteMany({ where: { businessAccountId: { in: bizIds }, invoice: null } });
+  await db.quote.deleteMany({ where: { businessAccountId: { in: bizIds } } });
+  await db.businessAccount.deleteMany({ where: { id: { in: bizIds } } });
+  await db.priceList.deleteMany({ where: { name: { startsWith: "e2e-" } } });
+  const customers = await db.customer.deleteMany({ where: { email: { startsWith: "smoke." } } });
   const admins = await db.adminUser.deleteMany({ where: { email: { startsWith: "smoke." } } }); // browser-test accounts (sessions cascade)
-  console.log(`Removed ${orders.count} test orders, ${enquiries.count} test enquiries, ${subs.count} test subscribers, ${admins.count} test admin accounts`);
+  console.log(`Removed ${orders.count} test orders, ${enquiries.count} test enquiries, ${subs.count} test subscribers, ${admins.count} test admin accounts, ${customers.count} test shoppers`);
 }
 
 main().finally(() => db.$disconnect());

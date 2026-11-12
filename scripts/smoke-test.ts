@@ -174,7 +174,7 @@ async function main() {
   check("customer invoice download without a session → 401", (await req("/api/account/orders/VV-000000-NOPE00/invoice")).status === 401);
 
   console.log("\nPages");
-  for (const p of ["/", "/shop", "/shop?category=dates", "/product/safawi-dates", "/cart", "/checkout", "/our-story", "/quality", "/contact", "/business", "/admin"]) {
+  for (const p of ["/", "/shop", "/shop?category=dates", "/product/safawi-dates", "/cart", "/checkout", "/our-story", "/quality", "/contact", "/business", "/admin", "/account"]) {
     const r = await req(p);
     check(`GET ${p} → 200`, r.status === 200, r.status);
   }

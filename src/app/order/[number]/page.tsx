@@ -11,9 +11,11 @@ import { Frame, HexBadge } from "@/components/ui/Ornaments";
 export const metadata: Metadata = { title: "Your order", robots: { index: false } };
 export const dynamic = "force-dynamic";
 
+const SHIPMENT_LABEL: Record<string, string> = { created: "Shipment created", picked_up: "Picked up", in_transit: "In transit", out_for_delivery: "Out for delivery", delivered: "Delivered", failed: "Delivery attempt failed", returned: "Returned to us" };
+
 export default async function OrderPage(props: { params: Promise<{ number: string }>; searchParams: Promise<{ t?: string; payment?: string }> }) {
   const [params, searchParams] = await Promise.all([props.params, props.searchParams]);
-  const order = await db.order.findUnique({ where: { number: params.number }, include: { items: true } });
+  const order = await db.order.findUnique({ where: { number: params.number }, include: { items: true, shipments: { orderBy: { createdAt: "asc" }, select: { courier: true, awb: true, trackingUrl: true, status: true } }, invoice: { select: { number: true } } } });
   // the access token keeps order details private to the person who placed it
   if (!order || !searchParams.t || searchParams.t !== order.accessToken) notFound();
 
@@ -94,6 +96,34 @@ export default async function OrderPage(props: { params: Promise<{ number: strin
             </p>
           </Frame>
         </div>
+
+        {(order.shipments.length > 0 || order.invoice) && (
+          <div className="mt-6">
+            <Frame tone="light" n={18} innerClassName="p-6 text-[13px]">
+              <h2 className="text-[30px] leading-none">{order.shipments.length > 0 ? "Tracking" : "Invoice"}</h2>
+              {order.shipments.map((sh) => (
+                <p key={`${sh.courier}-${sh.awb}`} className="mt-4 leading-relaxed" data-testid="shipment">
+                  {sh.courier} · tracking number <span className="font-medium">{sh.awb}</span> · {SHIPMENT_LABEL[sh.status] ?? sh.status}
+                  {sh.trackingUrl && (
+                    <>
+                      {" "}
+                      <a href={sh.trackingUrl} target="_blank" rel="noopener noreferrer" className="link-underline text-forest">
+                        Track shipment
+                      </a>
+                    </>
+                  )}
+                </p>
+              ))}
+              {order.invoice && (
+                <p className="mt-4">
+                  <a href={`/api/orders/${order.number}/invoice?t=${encodeURIComponent(searchParams.t)}`} className="link-underline text-forest" data-testid="invoice-link">
+                    Download tax invoice {order.invoice.number} (PDF)
+                  </a>
+                </p>
+              )}
+            </Frame>
+          </div>
+        )}
 
         <div className="mt-10 text-center text-[13px] text-forest/75">
           <p>

@@ -58,6 +58,9 @@ jobs:
       ADMIN_PASSWORD: ci-admin-password-not-secret
       SESSION_SECRET: ci-session-secret-not-secret-0123456789
       NEXT_TELEMETRY_DISABLED: "1"
+      # browser end-to-end tests (Playwright, tests/e2e) run inside verify:full against the disposable database, with the Chrome the runner ships
+      VERIFY_UI: "1"
+      CHROME_PATH: /usr/bin/google-chrome
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -66,3 +69,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run verify:full
+      - name: Keep browser test traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-traces
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 7

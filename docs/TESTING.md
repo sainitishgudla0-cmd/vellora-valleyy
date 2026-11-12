@@ -5,7 +5,7 @@
 | Unit | `tests/unit/*.test.ts` | nothing (DB and network mocked) | `npm run test` · focused: `npx vitest run tests/unit/<file>` |
 | Integration | `tests/integration/*.test.ts` | migrated **disposable** Postgres | `npm run test:integration` |
 | API smoke | `scripts/smoke-test.ts` (41 checks) | running server on a disposable DB | `npm run test:api` |
-| Browser UI | `scripts/e2e-ui.mjs` (51 checks) | same + Chrome (`CHROME_PATH`) | `npm run test:ui -- <base-url>` |
+| Browser E2E | `tests/e2e/*.spec.ts` (Playwright test runner) | same + Chrome (`CHROME_PATH`) | `npm run test:e2e` (server on `E2E_BASE_URL`, default 127.0.0.1:3100) |
 | Fast gate | — | — | `npm run verify` (typecheck + unit + env gate) |
 | Milestone gate | `scripts/verify-full.ts` | disposable Postgres | `npm run verify:full` (`VERIFY_UI=1` adds the browser test) |
 | CI | `.github/workflows/ci.yml` | Postgres 16 service container | on push to `main` and `backend/**` (and on PRs, if the user opens one) |
@@ -54,6 +54,9 @@ CI and `verify:full` run on Node 24 (use `nvm use 24`); the UI script works on b
 
 ## GST, invoices, shipping, notifications (M7)
 `tests/unit/gst-core.test.ts` holds the tax fixtures (illustrative 5/12/18% rates, paise-exact, intra vs inter, half-paisa rounding, a 20,000-case invariant sweep: parts always sum to the amount, tax within half a paisa of the exact value) for the accountant's review; `invoice-render.test.ts` proves PDF determinism and structure (xref offsets, stream lengths, hostile text) and template escaping. Integration: `gst-orders` (snapshot, rate lookup by date/HSN, shipping fee and serviceability in `createOrder`), `invoices` (issuing, 20 parallel invoices get exactly 1..20, failure injection leaves no gap, financial-year rollover, frozen regeneration, customer download authz, cancellation guard), `fulfilment-admin` (role x route matrix, tax-rate/shipping-rule/shipment/outbox APIs, public shipping quote), `notifications` (transactional queueing incl. rollback, retries with backoff, dead letters, parallel dispatchers send each message once, crash recovery, no network, never in production/preview). `tests/support/fulfilment.ts` stubs `SELLER_GSTIN` and `NOTIFY_MODE=mock`; the mock mailbox is in-process, so nothing reaches a real recipient.
+
+## Browser end-to-end and visual regression (M8)
+`tests/e2e/*.spec.ts` run on the Playwright test runner against a live server (`E2E_BASE_URL`, default 127.0.0.1:3100); `npm run verify:full` with `VERIFY_UI=1` builds, starts the server with the mock sign-in sender and a fake seller GSTIN, creates a throwaway owner (`admin:bootstrap --additional-owner`), and runs them; CI does the same with the runner's Chrome. Journeys: guest checkout through tracking and invoice (`guest-journey`), signed-in shopper (`account`), wholesale buyer (`wholesale`), admin (`admin`), layout (`responsive`). Tests are serial per file and share one disposable database; test data uses `smoke.` emails and `SMOKE TEST` names and `npm run db:cleanup-tests` removes it. The admin login is rate limited (8 per 15 minutes per IP): specs share one cached owner session and the admin spec uses a temporary owner. **Visual regression:** `visual.spec.ts` compares 11 existing pages (desktop and mobile) with baselines captured BEFORE a frontend change. Baselines are large and local (`tests/e2e/__screenshots__/<platform>/`, gitignored). Capture from a clean checkout: `npx playwright test visual --update-snapshots`; compare: `npx playwright test visual` (it skips where no baseline exists). `tests/unit/api-contract-coverage.test.ts` keeps `docs/API-CONTRACTS.md` and the route files in step.
 
 ## Conventions
 - Regression test for every fix (it must fail without the fix). Contract tests for every route.

@@ -2,7 +2,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { site } from "@/config/site";
 import { customerSchema, fieldErrors, INDIAN_STATES } from "@/lib/validation";
 import { cartCount, cartSubtotal, syncCartWithServer, useCart, useCartHydrated } from "@/store/cart";
@@ -41,6 +41,16 @@ function loadRazorpay() {
   });
 }
 
+/** What a failed order request means for the shopper (M8-T1). The server's own message is used when there is one. */
+function orderErrorMessage(status: number, data: { error?: string } | null): string {
+  if (data?.error) return data.error;
+  if (status === 429) return "Too many attempts. Please wait a few minutes and try again.";
+  if (status >= 500) return "We could not place your order right now. Nothing has been charged. Please try again in a moment.";
+  return "Could not place your order.";
+}
+
+type ShipQuote = { serviceable: boolean; fee: number; ruleBased: boolean };
+
 export function CheckoutForm({ online, cod }: { online: boolean; cod: boolean }) {
   const router = useRouter();
   const { lines, clear } = useCart();
@@ -50,6 +60,9 @@ export function CheckoutForm({ online, cod }: { online: boolean; cod: boolean })
   const [method, setMethod] = useState<"cod" | "razorpay">(cod ? "cod" : "razorpay");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [ship, setShip] = useState<ShipQuote | null>(null);
+  // one Idempotency-Key per distinct order request: a retry of the SAME request (double click, dropped connection) cannot create a second order
+  const attempt = useRef<{ body: string; key: string } | null>(null);
 
   useEffect(() => {
     if (hydrated) syncCartWithServer();
@@ -64,6 +77,29 @@ export function CheckoutForm({ online, cod }: { online: boolean; cod: boolean })
       /* ignore */
     }
   }, []);
+
+  // delivery fee and serviceability for the entered pincode (the same rules the server applies when the order is placed)
+  const pincode = f.pincode;
+  const cartTotal = cartSubtotal(lines);
+  useEffect(() => {
+    if (!/^[1-9]\d{5}$/.test(pincode)) {
+      setShip(null);
+      return;
+    }
+    const ctl = new AbortController();
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/shipping/quote?pincode=${pincode}&subtotal=${cartTotal}`, { signal: ctl.signal });
+        setShip(r.ok ? ((await r.json()) as ShipQuote) : null);
+      } catch {
+        /* the server decides when the order is placed */
+      }
+    }, 300);
+    return () => {
+      clearTimeout(t);
+      ctl.abort();
+    };
+  }, [pincode, cartTotal]);
 
   const set = (k: keyof Fields) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setF((x) => ({ ...x, [k]: e.target.value }));
@@ -90,7 +126,9 @@ export function CheckoutForm({ online, cod }: { online: boolean; cod: boolean })
     );
 
   const subtotal = cartSubtotal(lines);
-  const total = subtotal + site.delivery.fee;
+  const unserviceable = ship !== null && !ship.serviceable;
+  const deliveryFee = ship?.ruleBased ? ship.fee : site.delivery.fee;
+  const total = subtotal + deliveryFee;
   const blocked = lines.some((l) => l.unavailable);
   const canPay = (method === "cod" && cod) || (method === "razorpay" && online);
 
@@ -108,6 +146,11 @@ export function CheckoutForm({ online, cod }: { online: boolean; cod: boolean })
       setFormError("Please choose an available payment option.");
       return;
     }
+    if (unserviceable) {
+      setErrors((x) => ({ ...x, pincode: "We do not deliver to this pincode yet" }));
+      document.getElementById("f-pincode")?.focus();
+      return;
+    }
     setSubmitting(true);
     try {
       try {
@@ -117,15 +160,13 @@ export function CheckoutForm({ online, cod }: { online: boolean; cod: boolean })
       } catch {
         /* ignore */
       }
-      const res = await fetch("/api/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...f, paymentMethod: method, items: lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })) }),
-      });
-      const data = await res.json();
+      const body = JSON.stringify({ ...f, paymentMethod: method, items: lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })) });
+      if (attempt.current?.body !== body) attempt.current = { body, key: crypto.randomUUID() };
+      const res = await fetch("/api/orders", { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": attempt.current.key }, body });
+      const data = await res.json().catch(() => null);
       if (!res.ok) {
-        if (data.fields) setErrors(data.fields);
-        throw new Error(data.error ?? "Could not place your order.");
+        if (data?.fields) setErrors(data.fields);
+        throw new Error(orderErrorMessage(res.status, data));
       }
       const { number, token } = data.order;
       const confirmUrl = `/order/${number}?t=${encodeURIComponent(token)}`;
@@ -165,7 +206,8 @@ export function CheckoutForm({ online, cod }: { online: boolean; cod: boolean })
       clear();
       router.push(confirmUrl);
     } catch (err) {
-      setFormError((err as Error).message);
+      // a thrown TypeError from fetch is a network failure, not a server answer
+      setFormError(err instanceof TypeError ? "We could not reach the store. Please check your connection and try again." : (err as Error).message);
       setSubmitting(false);
     }
   }
@@ -186,7 +228,7 @@ export function CheckoutForm({ online, cod }: { online: boolean; cod: boolean })
             <Field id="addressLine1" label="House / flat, street" value={f.addressLine1} onChange={set("addressLine1")} onBlur={() => validateField("addressLine1")} error={errors.addressLine1} autoComplete="address-line1" className="sm:col-span-2" />
             <Field id="addressLine2" label="Area, landmark (optional)" value={f.addressLine2} onChange={set("addressLine2")} autoComplete="address-line2" className="sm:col-span-2" />
             <Field id="city" label="City / town" value={f.city} onChange={set("city")} onBlur={() => validateField("city")} error={errors.city} autoComplete="address-level2" />
-            <Field id="pincode" label="Pincode" value={f.pincode} onChange={set("pincode")} onBlur={() => validateField("pincode")} error={errors.pincode} inputMode="numeric" autoComplete="postal-code" maxLength={6} />
+            <Field id="pincode" label="Pincode" value={f.pincode} onChange={set("pincode")} onBlur={() => validateField("pincode")} error={errors.pincode || (unserviceable ? "We do not deliver to this pincode yet" : "")} inputMode="numeric" autoComplete="postal-code" maxLength={6} />
             <div className="sm:col-span-2">
               <label htmlFor="f-state" className="label">
                 State
@@ -271,7 +313,7 @@ export function CheckoutForm({ online, cod }: { online: boolean; cod: boolean })
             </div>
             <div className="flex justify-between">
               <dt>Delivery</dt>
-              <dd>{site.delivery.fee > 0 ? formatPrice(site.delivery.fee) : "To be confirmed"}</dd>
+              <dd>{ship?.ruleBased ? (ship.serviceable ? (ship.fee > 0 ? formatPrice(ship.fee) : "Free") : "Not available") : site.delivery.fee > 0 ? formatPrice(site.delivery.fee) : "To be confirmed"}</dd>
             </div>
             <div className="flex items-baseline justify-between pt-2">
               <dt className="eyebrow">Total</dt>
@@ -285,11 +327,12 @@ export function CheckoutForm({ online, cod }: { online: boolean; cod: boolean })
               {formError}
             </p>
           )}
-          <button type="submit" disabled={submitting || blocked || !canPay} className="btn btn-lg mt-5 w-full">
+          <button type="submit" disabled={submitting || blocked || !canPay || unserviceable} className="btn btn-lg mt-5 w-full">
             <Roll>{submitting ? "Placing order…" : method === "razorpay" ? `Pay ${formatPrice(total)}` : "Place order request"}</Roll>
             {!submitting && <IconArrowRight width={18} />}
           </button>
           {blocked && <p className="mt-2 text-[12px] text-red-700">Please remove unavailable items from your cart first.</p>}
+          {unserviceable && <p className="mt-2 text-[12px] text-red-700">We do not deliver to this pincode yet. Please call us and we will see what we can do.</p>}
           <p className="mt-3 text-center text-[11px] text-forest/55">
             By placing an order you agree to be contacted by {site.company} about it.
           </p>

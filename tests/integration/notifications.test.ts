@@ -242,8 +242,10 @@ describe("retries and failure handling", () => {
   it("parallel dispatchers send every message exactly once", async () => {
     for (let i = 0; i < 30; i++) await enqueueOutbox(db, { template: "order_confirmed", subjectType: "order", subjectId: (await placeCod(variantId)).id, dedupeKey: `bulk-${Date.now()}-${i}` });
     await db.outboxMessage.deleteMany({ where: { template: "order_placed" } });
-    const results = await Promise.all(Array.from({ length: 5 }, () => processOutbox({ limit: 12 })));
-    expect(results.reduce((s, r) => s + r.sent, 0)).toBe(30);
+    // several dispatchers race for the same queue, round after round, until it is drained (one round handles at most `limit` per worker)
+    let sent = 0;
+    for (let round = 0; round < 10 && sent < 30; round++) sent += (await Promise.all(Array.from({ length: 5 }, () => processOutbox({ limit: 12 })))).reduce((n, r) => n + r.sent, 0);
+    expect(sent).toBe(30);
     expect(mockMailbox).toHaveLength(30);
     expect(new Set(mockMailbox.map((m) => m.idempotencyKey)).size).toBe(30);
     expect(await db.outboxMessage.count({ where: { status: "sent" } })).toBe(30);

@@ -105,3 +105,9 @@ Additive: `Payment.manualReference` (unique, request-only only via CHECK) and `O
 - Invoice numbers are gap-free: never delete an `Invoice` row. A mistaken invoice needs a credit note (not built yet). The series restarts each financial year (April).
 - **Shipping:** with no shipping rules the shop serves every pincode at the site's default fee, as before. Adding the first active rule switches the shop to "a pincode needs a matching rule"; add a catch-all rule (empty prefix) to keep serving everywhere. Check the public answer with `GET /api/shipping/quote?pincode=`.
 - **Notifications are off in production** (`NOTIFY_MODE` unset): nothing is queued or sent, and `NOTIFY_MODE=mock` fails `env:check` there. Turning them on needs a real email provider adapter (not written: the provider is the business's choice; SMS also needs DLT registration) and then a cron entry for `/api/internal/outbox/process` (e.g. every minute; plan permitting) with `CRON_SECRET`. Because nothing is queued while notifications are off, enabling them later never sends a backlog.
+
+## M8 (no migration) — what changed for operators
+- No database change. New customer pages `/account` and `/account/orders/[number]` exist but are linked from nowhere until the business decides where (header/footer/order confirmation). Sign-in is unavailable in production until a real email sender exists, and says so.
+- The checkout now shows the delivery fee for the entered pincode (live, from the shipping rules) and sends an `Idempotency-Key` with each distinct order request. With no shipping rules nothing visible changes ("To be confirmed").
+- Guest and signed-in customers can download their tax invoice from the order page once staff issue it; tracking appears once a shipment is recorded.
+- CI now runs the browser suite inside `verify:full`; a failing run uploads Playwright traces as an artifact.

@@ -121,14 +121,14 @@ describe("shipping rules API and the public quote", () => {
   });
 
   it("the public quote answers exactly what an order would be charged, and validates input", async () => {
-    expect(await quote("?pincode=515001&subtotal=1000")).toMatchObject({ status: 200, body: { serviceable: true, fee: 0, freeAboveSubtotal: null } }); // legacy mode
+    expect(await quote("?pincode=515001&subtotal=1000")).toMatchObject({ status: 200, body: { serviceable: true, fee: 0, freeAboveSubtotal: null, ruleBased: false } }); // legacy mode
     await post({ name: "All", pincodePrefix: "", fee: 9900 });
     await post({ name: "Anantapur", pincodePrefix: "515", fee: 2500, freeAboveSubtotal: 50000 });
     await post({ name: "Island", pincodePrefix: "682", serviceable: false });
-    expect((await quote("?pincode=515001&subtotal=1000")).body).toEqual({ serviceable: true, fee: 2500, freeAboveSubtotal: 50000 });
+    expect((await quote("?pincode=515001&subtotal=1000")).body).toEqual({ serviceable: true, fee: 2500, freeAboveSubtotal: 50000, ruleBased: true });
     expect((await quote("?pincode=515001&subtotal=50000")).body.fee).toBe(0);
-    expect((await quote("?pincode=110001")).body).toEqual({ serviceable: true, fee: 9900, freeAboveSubtotal: null });
-    expect((await quote("?pincode=682001")).body).toEqual({ serviceable: false, fee: 0, freeAboveSubtotal: null });
+    expect((await quote("?pincode=110001")).body).toEqual({ serviceable: true, fee: 9900, freeAboveSubtotal: null, ruleBased: true });
+    expect((await quote("?pincode=682001")).body).toEqual({ serviceable: false, fee: 0, freeAboveSubtotal: null, ruleBased: true });
     for (const bad of ["", "?pincode=12345", "?pincode=012345", "?pincode=abcdef", "?pincode=515001&subtotal=-5", "?pincode=515001&subtotal=x"]) expect((await quote(bad)).status).toBe(422);
     rate.rateLimit.mockResolvedValue(false);
     expect((await quote("?pincode=515001")).status).toBe(429);

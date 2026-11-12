@@ -25,3 +25,8 @@ out
 .DS_Store
 *.pem
 *.key
+
+# Visual-regression baselines are large photographic PNGs (tens of MB): generated locally, never committed (see docs/TESTING.md)
+tests/e2e/__screenshots__/
+test-results/
+playwright-report/

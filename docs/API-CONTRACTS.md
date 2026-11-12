@@ -54,6 +54,12 @@ Rate limit 8 per 10 min. `{ email }` → `201 { ok }` (idempotent) · `422` · `
 ### <a id="test-environment"></a>`GET /api/internal/test-environment` (M1)
 Write-capable test handshake. **`404` whenever `APP_ENV` resolves to production or preview** (or is contradictory). Otherwise `200 { appEnv, testWritesAllowed: boolean, reasons: string[] }`; `testWritesAllowed` is true only with `TEST_TARGET=disposable` and a loopback or `DISPOSABLE_DB_HOSTS` database. Never returns credentials.
 
+### `GET /api/internal/test-environment/otp?email=` (M8, tests only)
+For browser tests, which cannot read an email: the newest mock sign-in code for an address (`200 { code }`). **`404` everywhere except a server that is `APP_ENV` development/test AND `CUSTOMER_OTP_MODE=mock` AND declares a disposable database** (so never preview/production, where mock mode is refused by `env:check`); also `404` for an address with no code. Never returns anything on a real deployment.
+
+### `GET /api/orders/[number]/invoice?t=<access token>` (M8)
+The tax invoice PDF for the holder of the order's access token (the same `t` the order page uses). `404` for a wrong token, an uninvoiced order or an unknown number (identical); `429` rate limited. Headers: `Cache-Control: private, no-store`, `Referrer-Policy: no-referrer`, attachment filename `VV-26-27-000001.pdf`.
+
 ## Admin (cookie `vv_admin`; every route calls `requireAdmin(req, permission)` — M4, ADR 0012)
 Individual accounts with roles `owner | operations | catalog | viewer`. `401` no/expired/revoked session · `403` role lacks the permission (audited) or a cross-origin mutation (`Origin`/`Sec-Fetch-Site` mismatch; browsers only — header-less script clients pass). Sessions are server-side: logout, deactivation, role change and password change revoke them at once. Permissions: `orders:write` (owner, operations) · `enquiries:write` (owner, operations) · `catalog:write` price/flag (owner, catalog) · `inventory:write` tracking/stock (owner, operations, catalog) · `testdata:write` (owner) · `users:manage` accounts/audit (owner, real accounts only) · `admin:read` reads, own sessions, own password (all roles).
 | Route | Body | Result |
@@ -166,7 +172,7 @@ Quote statuses: `requested -> quoted (re-quotable) -> accepted \| declined \| ex
 Amounts are integer paise; prices are GST-inclusive. Permissions: `fulfilment:read` and `fulfilment:write` (owner, operations), `tax:write` (owner only). Every mutation is audited (ids and field names only).
 | Route | Body / query | Result |
 |---|---|---|
-| `GET /api/shipping/quote?pincode=&subtotal=` (public, rate limited) | `pincode` 6 digits, `subtotal` paise (default 0) | `200 { serviceable, fee, freeAboveSubtotal }`: exactly what `POST /api/orders` would apply · `422` · `429` |
+| `GET /api/shipping/quote?pincode=&subtotal=` (public, rate limited) | `pincode` 6 digits, `subtotal` paise (default 0) | `200 { serviceable, fee, freeAboveSubtotal, ruleBased }`: exactly what `POST /api/orders` would apply (`ruleBased` false = no shipping rules exist, the site default fee applies and delivery is "to be confirmed") · `422` · `429` |
 | `GET/POST /api/admin/tax-rates` | `{ code: HSN (4/6/8 digits) \| "DELIVERY", rateBp (0-5000), effectiveFrom: "YYYY-MM-DD", note? }` | list · `201` · `409 rate_exists` (append-only per code and date) · `422`; POST needs `tax:write` |
 | `GET/POST /api/admin/shipping-rules` · `PATCH/DELETE …/[id]` | `{ name, pincodePrefix (0-6 digits), serviceable?, fee?, freeAboveSubtotal?, active? }` (PATCH: only what is sent) | `{ rules[], legacyMode }` · `409 prefix_in_use` · `422`. No active rule = legacy (everywhere, site fee); any active rule = a pincode needs a matching rule (longest prefix; empty prefix = catch-all) |
 | `POST /api/admin/orders/[id]/invoice` | — | `201 { invoice: { id, number, issuedAt, total, supplyType } }` · `200` repeat (idempotent) · `409 { code, detail[] }` `seller_not_configured` / `tax_not_configured` (lists HSN codes) / `order_not_invoiceable` · `404` |

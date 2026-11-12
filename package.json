@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.mts",
     "test:api": "tsx scripts/smoke-test.ts",
-    "test:ui": "tsx scripts/e2e-ui.mjs",
+    "test:ui": "playwright test",
+    "test:e2e": "playwright test",
     "verify": "npm run typecheck && npm run test && npm run env:check",
     "verify:full": "tsx scripts/verify-full.ts",
     "db:generate": "prisma generate",
@@ -47,11 +48,11 @@
     "zustand": "5.0.3"
   },
   "devDependencies": {
+    "@playwright/test": "1.55.1",
     "@types/node": "20.17.10",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "autoprefixer": "10.4.20",
-    "playwright-core": "1.48.2",
     "postcss": "8.4.49",
     "prisma": "5.22.0",
     "tailwindcss": "3.4.17",

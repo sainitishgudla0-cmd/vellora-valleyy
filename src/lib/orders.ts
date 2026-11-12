@@ -15,7 +15,8 @@ import { currentPaymentProvider, safePaymentConfig } from "./payments";
 import { mockProviderOrderId } from "./payments/providers/mock";
 
 export class OrderError extends Error {
-  constructor(message: string, public status = 400) {
+  /** `fields` lets the checkout form show the problem next to the input (additive: the response keeps `error` and `status`). */
+  constructor(message: string, public status = 400, public fields?: Record<string, string>) {
     super(message);
   }
 }
@@ -151,7 +152,7 @@ async function insertOrder(
   const subtotal = items.reduce((s, i) => s + i.lineTotal, 0);
   // Serviceability applies to every order; the fee comes from the shipping rules unless a quote fixed it (M7-T3).
   const shipping = await quoteShipping(tx, input.pincode, subtotal);
-  if (!shipping.serviceable) throw new OrderError("Sorry, we do not deliver to this pincode yet.", 422);
+  if (!shipping.serviceable) throw new OrderError("Sorry, we do not deliver to this pincode yet.", 422, { pincode: "We do not deliver to this pincode yet" });
   const deliveryFee = wholesale?.deliveryFee ?? shipping.fee;
   const total = subtotal + deliveryFee;
   if (wholesale?.beforeCreate) await wholesale.beforeCreate(tx, { subtotal, total });

@@ -1,5 +1,6 @@
 import "server-only";
 import crypto from "node:crypto";
+import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { fail } from "@/lib/api";
 import { allowedOriginsFromEnv, isMutation, isSameOrigin } from "./origin";
@@ -81,4 +82,15 @@ export async function revokeCustomerSession(sessionId: string) {
 
 export async function revokeAllCustomerSessions(customerId: string, exceptSessionId?: string) {
   return (await db.customerSession.updateMany({ where: { customerId, revokedAt: null, ...(exceptSessionId ? { id: { not: exceptSessionId } } : {}) }, data: { revokedAt: new Date() } })).count;
+}
+
+/** For server components (account pages): the signed-in customer, or null. Same checks as `customerFromRequest`. */
+export async function currentCustomer(): Promise<CustomerContext | null> {
+  try {
+    const token = (await cookies()).get(CUSTOMER_COOKIE)?.value;
+    if (!token) return null;
+    return await customerFromRequest(new Request("http://internal.invalid/", { headers: { cookie: `${CUSTOMER_COOKIE}=${token}` } }));
+  } catch {
+    return null;
+  }
 }

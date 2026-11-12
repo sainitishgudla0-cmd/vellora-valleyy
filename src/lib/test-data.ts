@@ -1,7 +1,7 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
 
-/** Records created by the automated smoke / UI tests (scripts/smoke-test.ts, scripts/e2e-ui.mjs). */
+/** Records created by the automated smoke / UI tests (scripts/smoke-test.ts, tests/e2e). */
 export const TEST_ORDER_WHERE: Prisma.OrderWhereInput = {
   OR: [{ customerName: { startsWith: "SMOKE TEST" } }, { email: { startsWith: "smoke." } }],
 };
