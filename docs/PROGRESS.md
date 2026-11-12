@@ -3,7 +3,7 @@
 _Read this first in a new session. Keep it under ~80 lines. Scope and AC per task: `BACKEND-ROADMAP.md`._
 
 ## Current
-- **Milestone:** M1-M3 integrated. **M4 (admin identity, roles, audit; T1-T6) complete; T6 admin UI on `backend/m4-admin-ui`**, awaiting CI then fast-forward. M5 needs approval.
+- **Milestone:** M1-M3 integrated. **M4 (admin identity, roles, audit, admin UI; T1-T6) complete and integrated**. M5 needs approval.
 - **Branch:** M1 is integrated: `backend/development` fast-forwarded from `backend/m2-payments` after each task (no PR workflow); see the M2-T6 entry for the latest SHA and CI run. `main` = `55aa848`, untouched. Working copy moved to `~/Developer/Velora-Valley` (the Desktop copy is iCloud-synced and spawns duplicate files). `main` = `55aa848`, untouched.
 - **Last verified:** 2026-11-11, `npm run verify:full` on throwaway Postgres 16 (127.0.0.1): all gates green. See the M1 evidence below.
 
@@ -28,6 +28,7 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 - 2FA deferred.
 - **T6 admin UI (approved 2026-11-12, `backend/m4-admin-ui`):** admin files only. Login form gains Email (required once `ADMIN_LEGACY_LOGIN=off`; empty email still signs in with the shared password while it is enabled). Header shows who is signed in. New **Account** tab (own sessions with sign-out, change password) for everyone and **Team** tab for owners (create/disable/enable/unlock/reset password, role select, all sessions, last 40 audit entries). Existing controls unchanged; limits are enforced by the API. Browser test extended (20 admin checks); `verify:full` creates a throwaway owner via `admin:bootstrap --additional-owner` (disposable DBs only).
 - **T6 evidence (2026-11-12, Node 24.22.3, fresh DB):** `verify:full` + `VERIFY_UI=1` -> typecheck ok, unit 289/289, integration 274/274, build ok, smoke 41/0, UI 71/0 (51 + 20 admin); `npm audit` 0. Browser-error summary lists only deliberate 401/403/422 responses.
+- CI on `backend/m4-admin-ui` @ `ad37c90`: green (run 43184929395, Node 24, both jobs). Code commit `ad37c90`.
 - Tests: `integration/{admin-auth,admin-users}` (role x route matrix, lockout, revocation, CSRF, audit completeness without secrets, last-owner race, bootstrap script run as a child process), `unit/{auth-core,admin-routes-ratchet}`; existing admin tests moved from auth mocks to real sessions. Mutation checks: removing the permission check, the lockout or the logout revocation each fails the suites.
 - **Evidence (2026-11-14, Node 24.22.3, throwaway Postgres 16.13, fresh DB):** `verify:full` + `VERIFY_UI=1` -> typecheck ok, unit 289/289, env ok, migrate deploy ok, schema diff none, integration 273/273, build ok, smoke 41/0, UI 51/0; `npm audit --omit=dev` 0. No frontend file changed.
 - CI on `backend/m4-admin-auth` @ `46b1749`: green (run 43177905336, Node 24, both jobs). Code commit `46b1749`.
