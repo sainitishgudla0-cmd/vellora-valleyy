@@ -46,7 +46,7 @@ Write-capable test handshake. **`404` whenever `APP_ENV` resolves to production 
 |---|---|---|
 | `POST /api/admin/login` | `{ password }` | `200 { ok }` + cookie · `401` · `429` (8 per 15 min) · `503` not configured |
 | `POST /api/admin/logout` | — | `200 { ok }` (clears cookie; stateless, no server revocation) |
-| `PATCH /api/admin/orders/[id]` | `{ status?, paymentStatus? }` (enums) | `200 { ok }` · `404`. **Any transition is allowed (M2 adds a state machine).** |
+| `PATCH /api/admin/orders/[id]` | `{ status?, paymentStatus? }` (enums) | `200 { ok }` · `404` · `422` for any value outside the enums (unchanged). **Any transition is allowed (M2-T2/T6 add a state machine).** |
 | `PATCH /api/admin/variants/[id]` | `{ price?: rupees (>0, ≤100000), inStock?: boolean }` | `200 { ok, price (paise), inStock }` · `404` |
 | `PATCH /api/admin/enquiries/[id]` | `{ status: new|in_progress|closed }` | `200 { ok }` · `404` |
 | `DELETE /api/admin/test-data` | — | `200 { ok, orders, enquiries, subscribers }`: deletes `SMOKE TEST` / `smoke.` records |
@@ -54,7 +54,7 @@ Write-capable test handshake. **`404` whenever `APP_ENV` resolves to production 
 ## Pages with backend reads
 `/order/[number]?t=<accessToken>` (404 without the matching token) · `/admin?tab=orders|enquiries|products` · `/checkout` (reads `onlinePaymentsEnabled()`, `site.allowCashOnDelivery`).
 
-## Status vocabularies (strings today; enums planned in M2)
+## Status vocabularies (Postgres enums since M2-T1, ADR 0005; JSON values are the same strings as before)
 - Order `status`: `pending_confirmation | awaiting_payment | confirmed | paid | dispatched | delivered | cancelled`
-- `paymentStatus`: `unpaid | paid | failed | refunded` · `paymentMethod`: `cod | razorpay`
+- `paymentStatus`: `unpaid | paid | failed | refunded` · `paymentMethod`: `cod | razorpay` (`cod` = pay-on-delivery request: stays `unpaid` until externally confirmed)
 - Enquiry `status`: `new | in_progress | closed`

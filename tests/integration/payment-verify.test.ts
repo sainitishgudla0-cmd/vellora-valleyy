@@ -4,6 +4,7 @@
  */
 import crypto from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { OrderStatus, PaymentStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { POST } from "@/app/api/payments/razorpay/verify/route";
 
@@ -14,7 +15,7 @@ const sign = (o: string, p: string) => crypto.createHmac("sha256", SECRET).updat
 const PREFIX = "VV-ITEST-";
 let seq = 0;
 
-async function makeOrder(over: Partial<{ status: string; paymentStatus: string; razorpayPaymentId: string }> = {}) {
+async function makeOrder(over: Partial<{ status: OrderStatus; paymentStatus: PaymentStatus; razorpayPaymentId: string }> = {}) {
   const n = `${PREFIX}${Date.now()}-${seq++}`;
   return db.order.create({
     data: {

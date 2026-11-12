@@ -1,11 +1,13 @@
 import { z } from "zod";
+import { OrderStatus, PaymentStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { fail, json, parseBody } from "@/lib/api";
 import { isAdmin } from "@/lib/admin-auth";
 
 const schema = z.object({
-  status: z.enum(["pending_confirmation", "awaiting_payment", "confirmed", "paid", "dispatched", "delivered", "cancelled"]).optional(),
-  paymentStatus: z.enum(["unpaid", "paid", "failed", "refunded"]).optional(),
+  // Derived from the Prisma enums so the API and the database cannot drift apart.
+  status: z.enum(OrderStatus).optional(),
+  paymentStatus: z.enum(PaymentStatus).optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {

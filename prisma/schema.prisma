@@ -54,16 +54,37 @@ model Variant {
   orderItems  OrderItem[]
 }
 
+/// Values are the exact legacy strings, so API/JSON serialisation is unchanged (ADR 0005).
+enum OrderStatus {
+  pending_confirmation
+  awaiting_payment
+  confirmed
+  paid
+  dispatched
+  delivered
+  cancelled
+}
+
+enum PaymentStatus {
+  unpaid
+  paid
+  failed
+  refunded
+}
+
+/// cod = pay on delivery (request-only: unpaid until externally confirmed); razorpay = online.
+enum PaymentMethod {
+  cod
+  razorpay
+}
+
 model Order {
-  id                String      @id @default(cuid())
-  number            String      @unique
+  id                String        @id @default(cuid())
+  number            String        @unique
   accessToken       String
-  /// pending_confirmation | awaiting_payment | confirmed | paid | dispatched | delivered | cancelled
-  status            String
-  /// cod | razorpay
-  paymentMethod     String
-  /// unpaid | paid | failed | refunded
-  paymentStatus     String      @default("unpaid")
+  status            OrderStatus
+  paymentMethod     PaymentMethod
+  paymentStatus     PaymentStatus @default(unpaid)
   customerName      String
   email             String
   phone             String
@@ -76,11 +97,11 @@ model Order {
   subtotal          Int
   deliveryFee       Int
   total             Int
-  razorpayOrderId   String?     @unique
+  razorpayOrderId   String?       @unique
   razorpayPaymentId String?
   items             OrderItem[]
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 }
 
 model OrderItem {

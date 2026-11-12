@@ -39,3 +39,19 @@ Operator-only procedures. Agents must not run anything in the "production" secti
 After reviewing `src/data/products.ts` changes:
 `APP_ENV=production CONFIRM_PRODUCTION_DB_HOST=<host> DATABASE_URL=<prod pooled> DATABASE_URL_UNPOOLED=<prod direct> npm run db:seed`
 This upserts products and variants and keeps admin-edited prices. Never pass `--reset-prices` in production without sign-off.
+
+## M2-T1 enum migration `20261112021101_order_payment_enums` (operator notes)
+Converts `Order.status` / `paymentMethod` / `paymentStatus` from TEXT to Postgres enums (ADR 0005). It locks `"Order"`, pre-checks every value, and aborts with the offending values and row counts if any row is outside the supported set (nothing is rewritten). One implicit transaction.
+- **Before production:** Neon backup branch, then rehearse on it (`migrate deploy` there). If the pre-check aborts, inspect the listed rows; fix them with a reviewed one-off statement, never by loosening the migration.
+- **Deploy order (breaking window):** run the migration, then deploy the app that has the regenerated Prisma client. The previous app build (string-typed client) cannot write the enum columns, so keep the window short and pause order intake meanwhile. Migrations are operator-run (`db:migrate:deploy:production`); builds never migrate.
+- **Rollback** (only if no new enum values were written; values stay identical strings):
+  ```sql
+  ALTER TABLE "Order" ALTER COLUMN "paymentStatus" DROP DEFAULT;
+  ALTER TABLE "Order" ALTER COLUMN "status" TYPE TEXT USING "status"::text,
+    ALTER COLUMN "paymentMethod" TYPE TEXT USING "paymentMethod"::text,
+    ALTER COLUMN "paymentStatus" TYPE TEXT USING "paymentStatus"::text;
+  ALTER TABLE "Order" ALTER COLUMN "paymentStatus" SET DEFAULT 'unpaid';
+  DROP TYPE "OrderStatus"; DROP TYPE "PaymentStatus"; DROP TYPE "PaymentMethod";
+  DELETE FROM "_prisma_migrations" WHERE migration_name = '20261112021101_order_payment_enums';
+  ```
+  then redeploy the previous app build. Or restore the Neon backup branch.
