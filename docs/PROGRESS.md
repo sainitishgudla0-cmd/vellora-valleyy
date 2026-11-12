@@ -3,7 +3,7 @@
 _Read this first in a new session. Keep it under ~80 lines. Scope and AC per task: `BACKEND-ROADMAP.md`._
 
 ## Current
-- **Milestone:** M1-M3 integrated. **M4 (admin identity, roles, audit; T1-T5) implemented on `backend/m4-admin-auth`**, awaiting CI then fast-forward; T6 (admin UI) needs approval. M5 needs approval.
+- **Milestone:** M1-M3 integrated. **M4 (admin identity, roles, audit; T1-T5) complete and integrated**; T6 (admin UI) needs approval. M5 needs approval.
 - **Branch:** M1 is integrated: `backend/development` fast-forwarded from `backend/m2-payments` after each task (no PR workflow); see the M2-T6 entry for the latest SHA and CI run. `main` = `55aa848`, untouched. Working copy moved to `~/Developer/Velora-Valley` (the Desktop copy is iCloud-synced and spawns duplicate files). `main` = `55aa848`, untouched.
 - **Last verified:** 2026-11-11, `npm run verify:full` on throwaway Postgres 16 (127.0.0.1): all gates green. See the M1 evidence below.
 
@@ -11,7 +11,7 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 | Task | Status | Notes |
 |---|---|---|
 | M3 inventory + order idempotency | done on `backend/m3-inventory` (see entry) | ADR 0011 |
-| M4 admin accounts, roles, audit | done on `backend/m4-admin-auth` (T1-T5; T6 UI not built) | ADR 0012 |
+| M4 admin accounts, roles, audit | done (T1-T5; T6 UI not built) | ADR 0012 |
 | M5 | proposed (needs approval) | see `BACKEND-ROADMAP.md` |
 
 ## Blockers / open items
@@ -28,6 +28,7 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 - **Not built:** T6 admin UI (needs approval; the dashboard login form cannot send an email, so the shared password cannot be retired until it does). 2FA deferred.
 - Tests: `integration/{admin-auth,admin-users}` (role x route matrix, lockout, revocation, CSRF, audit completeness without secrets, last-owner race, bootstrap script run as a child process), `unit/{auth-core,admin-routes-ratchet}`; existing admin tests moved from auth mocks to real sessions. Mutation checks: removing the permission check, the lockout or the logout revocation each fails the suites.
 - **Evidence (2026-11-14, Node 24.22.3, throwaway Postgres 16.13, fresh DB):** `verify:full` + `VERIFY_UI=1` -> typecheck ok, unit 289/289, env ok, migrate deploy ok, schema diff none, integration 273/273, build ok, smoke 41/0, UI 51/0; `npm audit --omit=dev` 0. No frontend file changed.
+- CI on `backend/m4-admin-auth` @ `46b1749`: green (run 43177905336, Node 24, both jobs). Code commit `46b1749`.
 - Open: admin UI (T6) and retiring `ADMIN_PASSWORD`; 2FA; run the bootstrap before relying on individual accounts in production; audit log has no retention policy yet.
 ### M3 — inventory, expiry and order idempotency (`backend/m3-inventory`, ADR 0011)
 - T1 `Variant.trackInventory` (opt-in, default off = legacy manual flag) + `stockQuantity`/`reserved`, append-only `InventoryMovement` ledger, DB CHECKs (no negative stock / over-reservation), derived `inStock` kept in API output (catalog + cart validate). Counters written only by `src/lib/inventory` (ratchet test). T2 `createOrder` is one transaction: guarded `UPDATE ... WHERE stock - reserved >= qty`, order, lines, attempt, idempotency claim; 409 names the item and units left. T3 cancel/dispatch inside the state machine release/consume holds (read from the ledger); `expireUnpaidOrders` + bearer-guarded `GET /api/internal/orders/expire` (gateway asked first; COD not expired; no cron entry in `vercel.json`, see runbook). T4 `Idempotency-Key` (hash stored, 24 h replay incl. 502 outcomes, 422 on body mismatch). T5 order-number collision retry (3). T6 `PATCH /api/admin/variants/[id]` `trackInventory`/`stockAdjust` + `GET /api/admin/variants/low-stock`.
