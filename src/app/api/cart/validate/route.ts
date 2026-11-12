@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { json, parseBody } from "@/lib/api";
+import { effectiveInStock } from "@/lib/inventory/availability";
 
 const schema = z.object({ variantIds: z.array(z.string().max(40)).max(60) });
 
@@ -13,6 +14,6 @@ export async function POST(req: Request) {
     include: { product: { select: { active: true } } },
   });
   return json({
-    variants: variants.map((v) => ({ id: v.id, price: v.price, mrp: v.mrp, available: v.inStock && v.product.active })),
+    variants: variants.map((v) => ({ id: v.id, price: v.price, mrp: v.mrp, available: effectiveInStock(v) && v.product.active })),
   });
 }

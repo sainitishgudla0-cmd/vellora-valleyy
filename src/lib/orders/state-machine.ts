@@ -1,5 +1,6 @@
 import { Prisma, type OrderActorType, type OrderEvent, type OrderStatus, type PaymentStatus } from "@prisma/client";
 import { db } from "@/lib/db";
+import { applyOrderInventoryEffects } from "@/lib/inventory/order-stock";
 
 /**
  * The single place that decides order/payment status changes (M2-T2, ADR 0006).
@@ -159,5 +160,7 @@ async function applyTransition(tx: TransitionTx, input: TransitionInput): Promis
       paymentReference: actor.type === "admin" && payment?.to === "paid" ? input.paymentReference?.trim() || null : null,
     },
   });
+  // Stock follows the order in the same transaction (M3, ADR 0011): cancel releases the hold, dispatch consumes it.
+  await applyOrderInventoryEffects(tx, { orderId, from, to, actor });
   return { ok: true as const, event };
 }

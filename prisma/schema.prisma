@@ -36,22 +36,81 @@ model Product {
 }
 
 model Variant {
-  id          String      @id @default(cuid())
-  sku         String      @unique // product barcode
-  label       String // e.g. "250g", "10 pieces (400g)"
-  weightGrams Int
+  id             String              @id @default(cuid())
+  sku            String              @unique // product barcode
+  label          String // e.g. "250g", "10 pieces (400g)"
+  weightGrams    Int
   /// selling price in paise
-  price       Int
+  price          Int
   /// brochure MRP in paise
-  mrp         Int
-  shelfLife   String
-  hsCode      String
-  image       String?
-  inStock     Boolean     @default(true)
-  sortOrder   Int         @default(0)
-  product     Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
-  productId   String
-  orderItems  OrderItem[]
+  mrp            Int
+  shelfLife      String
+  hsCode         String
+  image          String?
+  /// Manual availability flag. Only authoritative while `trackInventory` is false; tracked variants derive availability from counts (src/lib/inventory).
+  inStock        Boolean             @default(true)
+  /// true = per-unit counts are authoritative (M3, ADR 0011). false = legacy manual `inStock` flag; stock and reserved are then always 0.
+  trackInventory Boolean             @default(false)
+  /// Physical units on hand. Changed only by src/lib/inventory (DB CHECK: >= 0).
+  stockQuantity  Int                 @default(0)
+  /// Units held for open orders (reserved <= stockQuantity, DB CHECK). Changed only by src/lib/inventory.
+  reserved       Int                 @default(0)
+  sortOrder      Int                 @default(0)
+  product        Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId      String
+  orderItems     OrderItem[]
+  movements      InventoryMovement[]
+}
+
+/// What an inventory ledger row did (ADR 0011). Pairings are enforced by a DB CHECK.
+enum InventoryReason {
+  /// staff stock change (reservedDelta = 0, note required)
+  adjustment
+  /// units held for a new order (stockDelta = 0, reservedDelta > 0)
+  reserve
+  /// hold returned on cancellation/expiry (stockDelta = 0, reservedDelta < 0)
+  release
+  /// units left the warehouse on dispatch (stockDelta = reservedDelta < 0)
+  fulfil
+}
+
+/// Append-only ledger of every stock/reservation change. SUM(stockDelta) = Variant.stockQuantity and SUM(reservedDelta) = Variant.reserved for tracked variants.
+model InventoryMovement {
+  id            String          @id @default(cuid())
+  variantId     String
+  variant       Variant         @relation(fields: [variantId], references: [id])
+  /// Kept (set null) if the order row is ever deleted, so ledger sums stay equal to the counters.
+  orderId       String?
+  order         Order?          @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  reason        InventoryReason
+  stockDelta    Int
+  reservedDelta Int
+  stockAfter    Int
+  reservedAfter Int
+  note          String?
+  actorType     OrderActorType
+  actorId       String?
+  createdAt     DateTime        @default(now())
+
+  @@index([variantId, createdAt])
+  @@index([orderId])
+}
+
+/// Replay protection for POST /api/orders (M3-T4). Only a hash of the client key is stored.
+model IdempotencyKey {
+  id             String   @id @default(cuid())
+  keyHash        String   @unique
+  /// sha256 of the canonical request body: the same key with a different body is rejected.
+  requestHash    String
+  orderId        String?  @unique
+  order          Order?   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  /// Filled once the response is final; NULL while the request is still being processed.
+  responseStatus Int?
+  responseBody   String?
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+
+  @@index([expiresAt])
 }
 
 /// Values are the exact legacy strings, so API/JSON serialisation is unchanged (ADR 0005).
@@ -79,33 +138,37 @@ enum PaymentMethod {
 }
 
 model Order {
-  id                String        @id @default(cuid())
-  number            String        @unique
-  accessToken       String
-  status            OrderStatus
-  paymentMethod     PaymentMethod
-  paymentStatus     PaymentStatus @default(unpaid)
+  id                 String              @id @default(cuid())
+  number             String              @unique
+  accessToken        String
+  status             OrderStatus
+  paymentMethod      PaymentMethod
+  paymentStatus      PaymentStatus       @default(unpaid)
   /// Server-resolved PAYMENT_MODE of the provider that handled this order. NULL = legacy/unclassified (created before M2-T4; never guessed).
-  paymentMode       PaymentMode?
-  customerName      String
-  email             String
-  phone             String
-  addressLine1      String
-  addressLine2      String?
-  city              String
-  state             String
-  pincode           String
-  notes             String?
-  subtotal          Int
-  deliveryFee       Int
-  total             Int
-  razorpayOrderId   String?       @unique
-  razorpayPaymentId String?
-  items             OrderItem[]
-  events            OrderEvent[]
-  payments          Payment[]
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  paymentMode        PaymentMode?
+  customerName       String
+  email              String
+  phone              String
+  addressLine1       String
+  addressLine2       String?
+  city               String
+  state              String
+  pincode            String
+  notes              String?
+  subtotal           Int
+  deliveryFee        Int
+  total              Int
+  razorpayOrderId    String?             @unique
+  razorpayPaymentId  String?
+  items              OrderItem[]
+  events             OrderEvent[]
+  payments           Payment[]
+  inventoryMovements InventoryMovement[]
+  idempotencyKey     IdempotencyKey?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@index([status, createdAt])
 }
 
 /// Which integration handled a payment attempt (src/lib/payments/providers).

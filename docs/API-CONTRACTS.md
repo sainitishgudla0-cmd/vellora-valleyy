@@ -11,7 +11,7 @@ Query: `q` (≤80 chars), `category` (comma list of category slugs), `sort` (`fe
 → `200 { product: ProductView }` · `404`.
 
 ### `POST /api/cart/validate`
-Body `{ variantIds: string[] (≤60, each ≤40) }` → `200 { variants: { id, price, mrp, available }[] }` (unknown ids omitted). No rate limit.
+Body `{ variantIds: string[] (≤60, each ≤40) }` → `200 { variants: { id, price, mrp, available }[] }` (unknown ids omitted). `available` is derived from units for inventory-tracked variants (M3), the manual flag otherwise; counts are never returned. No rate limit.
 
 ### <a id="post-apiorders"></a>`POST /api/orders`
 Rate limit 10 per 10 min per IP. Body = `orderSchema` (`src/lib/validation.ts`): customer fields (Indian mobile, 6-digit pincode, state enum) + `paymentMethod: "cod"|"razorpay"` + `items: { variantId, quantity 1..50 }[]` (1..60). Prices, totals, status, provider and payment mode are server-side only: unknown body fields are ignored.
@@ -21,7 +21,9 @@ Every order is created with its `Payment` attempt in one insert (M2-T5, ADR 0009
 - **Mock (`PAYMENT_MODE=mock`, development/test only)**: the `razorpay` method creates a mock order: `201 { order, payment: { provider: "mock", orderId, amount, currency, mock: true, label: "MOCK — no money moved" } }`. No key, signature or confirm credential is ever returned. The storefront does not offer this method in mock mode (`onlinePaymentsEnabled()` is false there); it is exercised by `npm run payments:mock-checkout`.
 - `400` method unavailable (online method while online payments are off) · `409` item unavailable or unknown · `422` · `429` · `500`.
 - `502 { error }` gateway failure: *definite* (gateway refused, or its answer disagreed on amount/currency/shape): order `cancelled`, attempt `failed`, "No money has been taken". *Unknown outcome* (timeout, 5xx, 429, lost response, failure persisting the reference): `502 { error, orderNumber }`, order kept `awaiting_payment`, attempt flagged `needsReconciliation`; no gateway reference is ever returned to the client, so nothing can be paid. Resolved by `npm run payments:reconcile`.
-- Duplicate submissions create independent orders (idempotency keys and stock reservation are M3).
+- **Stock (M3, ADR 0011):** for inventory-tracked variants the units are held in the same transaction as the order. `409 { error }` names the product and variant (`Only 2 of <name> (250g) left in stock…` / `<name> (250g) is out of stock.`) and nothing is created or held. Untracked variants behave as before. Order-number collisions are retried (max 3) before a `503`.
+- **`Idempotency-Key` header (optional, M3):** 16-128 chars `[A-Za-z0-9_-]`, else `400`. Same key + same body within 24 h replays the first response (`201`, or the stored `502`) with header `Idempotent-Replayed: true`, creating nothing; same key + different body `422`; a request still being processed `409` + `Retry-After: 2`. A refused order (409) does not consume the key. Without the header every request is an independent order, as before. Only a hash of the key is stored.
+- Unpaid online orders are cancelled after the payment window (default 60 min) by the expiry job below, which releases their stock.
 
 ### <a id="payment-verify"></a>`POST /api/payments/razorpay/verify`
 Rate limit 20 per 10 min per IP. Body `{ orderNumber, token, razorpay_order_id, razorpay_payment_id, razorpay_signature }`. An order becomes paid only after validation against server records, a valid signature, **and** a server-side gateway lookup showing the payment `captured` for this gateway order with exactly the stored amount and INR.
@@ -55,7 +57,8 @@ Write-capable test handshake. **`404` whenever `APP_ENV` resolves to production 
 | `POST /api/admin/login` | `{ password }` | `200 { ok }` + cookie · `401` · `429` (8 per 15 min) · `503` not configured |
 | `POST /api/admin/logout` | — | `200 { ok }` (clears cookie; stateless, no server revocation) |
 | `PATCH /api/admin/orders/[id]` | `{ status?, paymentStatus?, reason? (≤500), paymentReference? (3-80) }` (enums; unknown values `422`) | `200 { ok }` (also for an unchanged/empty request) · `401` · `404` · `422 { fields }` reason or reference missing/malformed · `409 { error, code }` invalid transition, admin not allowed (e.g. marking an order paid), stale, payment edit not allowed, no payment record, reference already used. **Every change goes through the order state machine (M2-T6, ADR 0010)**: one transaction, an `OrderEvent` (actor `admin`, reason, payment reference) per change. See below. |
-| `PATCH /api/admin/variants/[id]` | `{ price?: rupees (>0, ≤100000), inStock?: boolean }` | `200 { ok, price (paise), inStock }` · `404` |
+| `PATCH /api/admin/variants/[id]` | `{ price?: rupees (>0, ≤100000), inStock?: boolean, trackInventory?: boolean (needs reason 3-200), reason?, stockAdjust?: { delta: non-zero integer (±100000), reason 3-200 } }` | `200 { ok, price (paise), inStock (derived when tracked), trackInventory, stockQuantity?, reserved?, available? }` (count fields only when tracked) · `401` · `404` · `422` · `409 { error, code }` `not_tracked` / `negative_stock` / `below_reserved` / `reserved_open`. `inStock` is ignored for tracked variants. Inventory changes are atomic, audited in `InventoryMovement` (actor `admin`), applied before the price. (M3, ADR 0011) |
+| `GET /api/admin/variants/low-stock?threshold=5` | — | `200 { threshold, variants: { variantId, sku, product, label, stockQuantity, reserved, available }[] }` tracked variants of active products with `available <= threshold`, lowest first · `401` · `422` bad threshold (0-10000) |
 | `PATCH /api/admin/enquiries/[id]` | `{ status: new|in_progress|closed }` | `200 { ok }` · `404` |
 | `DELETE /api/admin/test-data` | — | `200 { ok, orders, enquiries, subscribers }`: deletes `SMOKE TEST` / `smoke.` records |
 
@@ -92,3 +95,7 @@ Internal modules only; no HTTP contract changes. `Payment` rows are not written 
 - **Refund bookkeeping** (`{ paymentStatus: "refunded", reason }`): `paid → refunded` records that a refund was made outside the system (real refunds are M10). `refunded` is terminal.
 - All other payment edits are refused (`409 payment_edit_not_allowed`). Orders with no payment record, and legacy orders, need operator reconciliation.
 - The admin dashboard dropdown (status only) is unchanged; a rejected move shows the existing "Error" and reverts. There is no admin UI yet for entering a payment reference (needs a UI approval); the endpoint is API-only.
+
+## Inventory and expiry (M3, ADR 0011)
+- Tracking is per variant (`trackInventory`, default off = legacy manual `inStock`). Tracked: available = `stockQuantity - reserved`; order creation reserves, cancel/expiry before dispatch releases, dispatch consumes stock. All through `InventoryMovement` (append-only; SUM = counters); DB CHECKs forbid negative stock and over-reservation.
+- `GET /api/internal/orders/expire` (Vercel Cron GET, `Authorization: Bearer $CRON_SECRET`): `404` unless `CRON_SECRET` is 24+ chars · `401` wrong/missing bearer · `503` payments misconfigured · `200 { ok, checked, expired, paid, pending, skipped, errors, keysDeleted }` (counts only). Cancels unpaid online orders older than `PAYMENT_WINDOW_MINUTES` (default 60, min 15) after asking the gateway (captured -> marked paid; authorized -> left; unreadable -> skipped). Never touches pay-on-delivery orders. Also deletes idempotency keys past 24 h.

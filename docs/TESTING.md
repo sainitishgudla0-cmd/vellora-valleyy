@@ -40,6 +40,9 @@ Mock orders and attempts exist only in test fixtures (`tests/support/mock-orders
 Integration tests drive the real route handlers (`POST /api/orders`, `/verify`, `/mock/confirm`) against the disposable DB with `tests/support/fake-razorpay.ts` replacing `fetch`: any non-`api.razorpay.com` request throws, so tests cannot reach live services. Failure injection uses temporary Postgres triggers. `npm run payments:mock-checkout` is the dev runner for the mock flow against a running local server (`PAYMENT_MODE=mock`, `MOCK_PAYMENT_CONFIRM_KEY` set on the server and the runner, `BASE_URL`, `TEST_TARGET=disposable`); it refuses servers that do not prove they are disposable.
 CI and `verify:full` run on Node 24 (use `nvm use 24`); the UI script works on both Node 20 and 24.
 
+## Inventory and idempotency (M3)
+`tests/support/inventory.ts` creates throwaway products/variants (slug prefix `m3-fixture-`, customer `SMOKE TEST Stock`) and sets stock through the real ledger, so the seeded catalogue is never touched; every inventory test file ends by asserting `findLedgerDrift()` is empty. Concurrency tests (N parallel orders for the last unit, repeated 20 times; opposite line orders for deadlocks) run against the real Postgres. Order-number collisions are forced by spying on `crypto.randomBytes`. Expiry tests use `fake-razorpay.ts`. `tests/unit/inventory-ratchet.test.ts` fails if any code outside `src/lib/inventory/` writes the stock columns.
+
 ## Conventions
 - Regression test for every fix (it must fail without the fix). Contract tests for every route.
 - Test data uses `SMOKE TEST` / `smoke.` markers and fake credentials (`rzp_test_*`, locally computed HMACs).

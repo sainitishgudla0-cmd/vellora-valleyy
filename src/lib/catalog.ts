@@ -1,6 +1,7 @@
 import "server-only";
 import type { Prisma, Product, Variant } from "@prisma/client";
 import { db } from "./db";
+import { effectiveInStock } from "./inventory/availability";
 import { isCategorySlug } from "@/data/categories";
 import type { CategorySlug, ProductView } from "@/data/types";
 
@@ -31,7 +32,7 @@ export function toView(p: ProductWithVariants): ProductView {
         shelfLife: v.shelfLife,
         hsCode: v.hsCode,
         image: v.image,
-        inStock: v.inStock,
+        inStock: effectiveInStock(v),
       })),
   };
 }
