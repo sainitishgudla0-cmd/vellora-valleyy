@@ -173,6 +173,9 @@ describe("order/payment enum migration on representative legacy data", () => {
     const { url } = await newScratch("drift");
     expect(runSql(url, "0_init").ok).toBe(true);
     expect(runSql(url, ENUM_DIR).ok).toBe(true);
+    // later migrations (applied after the enum migration, in order) complete the schema
+    const later = fs.readdirSync(migrationsDir).filter((d) => /^\d/.test(d) && d > ENUM_DIR).sort();
+    for (const m of later) expect(runSql(url, m).ok, m).toBe(true);
     // exit code 0 = no difference
     execFileSync(process.execPath, [prismaCli, "migrate", "diff", "--from-url", url, "--to-schema-datamodel", "prisma/schema.prisma", "--exit-code"], { stdio: "pipe" });
   });

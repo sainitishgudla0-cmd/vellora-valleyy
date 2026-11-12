@@ -58,3 +58,6 @@ Write-capable test handshake. **`404` whenever `APP_ENV` resolves to production 
 - Order `status`: `pending_confirmation | awaiting_payment | confirmed | paid | dispatched | delivered | cancelled`
 - `paymentStatus`: `unpaid | paid | failed | refunded` · `paymentMethod`: `cod | razorpay` (`cod` = pay-on-delivery request: stays `unpaid` until externally confirmed)
 - Enquiry `status`: `new | in_progress | closed`
+
+## Order state machine (M2-T2, ADR 0006)
+Internal module only; no HTTP contract changes yet. `OrderEvent` rows are written by `transitionOrder`. Routes are moved onto it in M2-T5/T6 (admin PATCH will then return `409` for invalid transitions).

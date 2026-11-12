@@ -1,0 +1,10 @@
+# ADR 0006 — Order state machine and event history
+
+- **Status:** accepted (M2-T2, 2026-11-11)
+- **Decision:** `src/lib/orders/state-machine.ts` is the only module that may change `Order.status` / `paymentStatus` after creation. `transitionOrder({orderId, from, to, payment?, actor, reason?, data?})` validates against two tables, applies a conditional `updateMany` (the concurrency guard) and inserts an `OrderEvent` in one transaction. Expected failures are returned (`invalid_transition | actor_not_allowed | reason_required | invalid_reason | stale_state | not_found`), never thrown.
+- **Order graph:** `pending_confirmation → confirmed|cancelled` · `awaiting_payment → paid|cancelled` · `confirmed → dispatched|cancelled` · `paid → dispatched|cancelled` · `dispatched → delivered|cancelled` · `delivered`, `cancelled` terminal.
+- **Payment graph:** `unpaid → paid|failed` · `failed → paid|unpaid` · `paid → refunded` · `refunded` terminal. A payment-only change uses `from === to`.
+- **Actors** (`OrderActorType`: customer, admin, system, gateway): `paid` (order or payment) only by gateway/system; confirm/dispatch/deliver only by admin/system. A reason is required for admin actors, cancellations and refunds.
+- **Business rule kept:** nothing here confirms an offline payment automatically, and admins cannot mark a payment paid yet. Staff payment-reference capture and audited manual confirmation are designed in M2-T6; opening `paid` to an admin actor is part of that task.
+- **History:** `OrderEvent(fromStatus, toStatus, fromPaymentStatus?, toPaymentStatus?, actorType, actorId?, reason?)`, append-only, `ON DELETE CASCADE` from `Order` so `db:cleanup-tests` works (real orders are not deleted). The migration is purely additive.
+- **Not yet wired:** callers still write directly (admin PATCH, `/api/orders`, `/verify`). `tests/unit/state-machine-ratchet.test.ts` pins them by file and count; T5/T6 migrate them and lower the numbers. Order creation sets the initial status and is not a transition.

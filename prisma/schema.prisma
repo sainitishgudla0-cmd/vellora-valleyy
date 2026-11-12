@@ -100,8 +100,35 @@ model Order {
   razorpayOrderId   String?       @unique
   razorpayPaymentId String?
   items             OrderItem[]
+  events            OrderEvent[]
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
+}
+
+/// Who initiated a status change (ADR 0006).
+enum OrderActorType {
+  customer
+  admin
+  system
+  gateway
+}
+
+/// Append-only history of order/payment status changes, written only by src/lib/orders/state-machine.ts.
+/// Cascade keeps `db:cleanup-tests` working; real orders are never deleted.
+model OrderEvent {
+  id                String         @id @default(cuid())
+  orderId           String
+  order             Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  fromStatus        OrderStatus
+  toStatus          OrderStatus
+  fromPaymentStatus PaymentStatus?
+  toPaymentStatus   PaymentStatus?
+  actorType         OrderActorType
+  actorId           String?
+  reason            String?
+  createdAt         DateTime       @default(now())
+
+  @@index([orderId, createdAt])
 }
 
 model OrderItem {
