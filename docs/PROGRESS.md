@@ -4,7 +4,7 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 
 ## Current
 - **Milestone:** M2 in progress on `backend/m2-payments`. **M2 complete (T1..T6)**, awaiting user review. M3 needs approval.
-- **Branch:** M1 is integrated: `backend/development` = see the M2-T5 entry below (fast-forwarded from `backend/m2-payments`; no PR workflow). Working copy moved to `~/Developer/Velora-Valley` (the Desktop copy is iCloud-synced and spawns duplicate files). `main` = `55aa848`, untouched.
+- **Branch:** M1 is integrated: `backend/development` fast-forwarded from `backend/m2-payments` after each task (no PR workflow); see the M2-T6 entry for the latest SHA and CI run. `main` = `55aa848`, untouched. Working copy moved to `~/Developer/Velora-Valley` (the Desktop copy is iCloud-synced and spawns duplicate files). `main` = `55aa848`, untouched.
 - **Last verified:** 2026-11-11, `npm run verify:full` on throwaway Postgres 16 (127.0.0.1): all gates green. See the M1 evidence below.
 
 ## Next up
@@ -25,6 +25,7 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 - `PATCH /api/admin/orders/[id]` → `updateOrderAsAdmin` → `transitionOrder` (actor admin): invalid transitions 409, reason/reference 422, admin can never set an order `paid`. Manual payment confirmation only for request-only orders (payment-only, reason + external reference stored on `Payment.manualReference` (unique) and the event); `paid → refunded` bookkeeping with reason; gateway/mock/legacy payments not editable. Payment row + order + event in one transaction. State machine: admin may confirm a payment only with a valid reference, payment-only. Additive migration `manual_payment_confirmation`. Direct-writer ratchet legacy list is now empty. No frontend change (dropdown unchanged; no UI yet for entering a reference — needs approval).
 - Tests: `integration/admin-orders.test.ts` (25: transitions, invalid 409, no-paid-by-admin, default/explicit reasons, manual confirm incl. reference reuse rollback, refused for razorpay/mock/legacy/no-record/cancelled, refund bookkeeping, race, trigger-injected rollback, DB CHECK), state-machine unit additions, PATCH boundary unit tests rewritten.
 - **Evidence (2026-11-12, Node 24.22.3, throwaway Postgres 16.13, fresh DB):** `verify:full` + `VERIFY_UI=1` → typecheck ✓ · unit 231/231 ✓ · env ✓ · migrate deploy ✓ · schema diff none ✓ · integration 147/147 ✓ · build ✓ · smoke 41/0 ✓ · UI 51/0 ✓; `npm audit --omit=dev` 0.
+- CI on `backend/m2-payments` @ `46f7eb7`: green (run 43157297749, Node 24). Code commit `46f7eb7`.
 - M2 acceptance (roadmap): no application code writes `Order.status`/`paymentStatus` outside the state machine (ratchet test, empty legacy list); mock impossible in preview/production (tests, ADR 0002/0008); 41 smoke + 51 UI pass; contracts updated.
 - Open for later: admin UI for payment references; per-person admin identity (M4); order idempotency + stock (M3); webhooks/refunds (M10).
 ### M2-T5 — order/payment integration (ADR 0009)
