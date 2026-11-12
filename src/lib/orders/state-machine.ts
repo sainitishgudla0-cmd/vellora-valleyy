@@ -86,6 +86,9 @@ export function validateTransition(input: Omit<TransitionInput, "orderId" | "dat
   if (payment && !canTransitionPayment(payment.from, payment.to)) {
     return fail("invalid_transition", `Payment cannot move from ${payment.from} to ${payment.to}`);
   }
+  // Combined-state invariants (an order's status and its payment must never contradict each other).
+  if (statusChange && to === "paid" && payment?.to !== "paid") return fail("invalid_transition", "An order can only become paid together with its payment");
+  if (payment?.to === "paid" && to === "cancelled") return fail("invalid_transition", "A cancelled order cannot be paid");
   if (statusChange && ORDER_TARGET_ACTORS[to] && !ORDER_TARGET_ACTORS[to]!.includes(actor.type)) {
     return fail("actor_not_allowed", `${actor.type} may not move an order to ${to}`);
   }

@@ -57,7 +57,7 @@ describe("transitionOrder (real database)", () => {
 
   it("a stale caller loses: no change, no event, current state reported", async () => {
     const o = await makeOrder("cancelled");
-    const r = await transitionOrder({ orderId: o.id, from: "awaiting_payment", to: "paid", actor: { type: "gateway" } });
+    const r = await transitionOrder({ orderId: o.id, from: "awaiting_payment", to: "paid", payment: { from: "unpaid", to: "paid" }, actor: { type: "gateway" } });
     expect(r).toMatchObject({ ok: false, code: "stale_state", current: { status: "cancelled", paymentStatus: "unpaid" } });
     expect(await events(o.id)).toHaveLength(0);
   });

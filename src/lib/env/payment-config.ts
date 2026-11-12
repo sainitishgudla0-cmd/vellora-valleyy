@@ -10,6 +10,7 @@
  *
  * Live Razorpay keys outside production are always rejected, whatever the mode.
  * PAYMENT_MODE unset => request_only (configured keys are ignored, with a warning).
+ * MOCK_PAYMENT_CONFIRM_KEY (mock confirmation credential) is rejected in preview and production.
  */
 import { resolveAppEnv, type AppEnv, type EnvSource, EnvSafetyError } from "./app-env";
 
@@ -70,6 +71,15 @@ export function resolvePaymentConfig(env: EnvSource = process.env): PaymentConfi
 
   if (!ALLOWED_ENVS[mode].includes(appEnv)) {
     issues.push(`PAYMENT_MODE=${mode} is not allowed when APP_ENV=${appEnv} (allowed: ${ALLOWED_ENVS[mode].join(", ")}).`);
+  }
+
+  // The mock confirmation key exists only for development/test. Finding it where real customers pay means a
+  // misconfigured deployment, so configuration fails closed (build gate, and online payments disabled at runtime).
+  const mockKey = env.MOCK_PAYMENT_CONFIRM_KEY?.trim() || "";
+  if (mockKey && (appEnv === "preview" || appEnv === "production")) {
+    issues.push(`MOCK_PAYMENT_CONFIRM_KEY must not be set when APP_ENV=${appEnv} (it is a development/test-only credential).`);
+  } else if (mockKey && mode !== "mock") {
+    warnings.push("MOCK_PAYMENT_CONFIRM_KEY is set but PAYMENT_MODE is not mock; it has no effect.");
   }
 
   if (mode === "razorpay_test" || mode === "razorpay_live") {

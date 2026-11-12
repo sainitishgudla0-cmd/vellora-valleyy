@@ -55,3 +55,8 @@ Converts `Order.status` / `paymentMethod` / `paymentStatus` from TEXT to Postgre
   DELETE FROM "_prisma_migrations" WHERE migration_name = '20261112021101_order_payment_enums';
   ```
   then redeploy the previous app build. Or restore the Neon backup branch.
+
+## M2-T3..T5 migrations (`payment_attempts`, `order_payment_mode`, `payment_reconciliation`) — operator notes
+All additive. `order_payment_mode` adds CHECK constraints (mode/method pairing; mock orders hold no Razorpay ids; Payment provider/mode pairing; mock payment ids `mock_pay_*`); existing orders keep `paymentMode = NULL` (unclassified). Rollback = drop the added constraints/columns/tables in reverse order after a Neon backup branch.
+- **Deploy order for T5 (important):** migrations first, then the app. Orders placed *before* the app deploy have no `Payment` attempt and no `paymentMode`; if their customer pays during the window, `/verify` answers `409` (legacy_unclassified) and the payment must be reconciled by hand (check the Razorpay dashboard, then use the admin tools / a reviewed one-off). Keep the window short or pause online checkout.
+- Run `npm run payments:reconcile` periodically (until M10 webhooks) and after any Razorpay incident.

@@ -36,7 +36,8 @@ export function createMockProvider(config: Pick<PaymentConfig, "mode" | "appEnv"
         providerOrderId,
         amountPaise: req.amountPaise,
         currency: req.currency,
-        clientPayload: { provider: "mock", orderId: providerOrderId, amount: req.amountPaise, currency: req.currency, mock: true },
+        // explicitly simulated; never contains the confirm key or the proof signature
+        clientPayload: { provider: "mock", orderId: providerOrderId, amount: req.amountPaise, currency: req.currency, mock: true, label: MOCK_PAYMENT_LABEL },
       };
     },
     verifyPayment(proof) {

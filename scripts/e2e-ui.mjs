@@ -5,7 +5,10 @@
 // server confirms its database is disposable (scripts/lib/safety.ts).
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
-import { assertServerIsDisposable } from './lib/safety.ts';
+// tsx compiles the .ts helper as CommonJS under Node 24, where a static named import from this .mjs fails
+// (it worked on Node 20). A dynamic import with a default fallback works on both.
+const safety = await import('./lib/safety.ts');
+const assertServerIsDisposable = safety.assertServerIsDisposable ?? safety.default?.assertServerIsDisposable;
 const [,, BASE='http://localhost:3000', OUT='./.e2e-screenshots'] = process.argv;
 await assertServerIsDisposable(BASE);
 fs.mkdirSync(OUT, { recursive: true });

@@ -13,24 +13,32 @@ Query: `q` (≤80 chars), `category` (comma list of category slugs), `sort` (`fe
 ### `POST /api/cart/validate`
 Body `{ variantIds: string[] (≤60, each ≤40) }` → `200 { variants: { id, price, mrp, available }[] }` (unknown ids omitted). No rate limit.
 
-### `POST /api/orders`
-Rate limit 10 per 10 min per IP. Body = `orderSchema` (`src/lib/validation.ts`): customer fields (Indian mobile, 6-digit pincode, state enum) + `paymentMethod: "cod"|"razorpay"` + `items: { variantId, quantity 1..50 }[]` (1..60).
-- `201 { order: { number, token, total } }` (COD, status `pending_confirmation`).
-- `201 { order, payment: { provider: "razorpay", keyId, orderId, amount, currency } }` (online, status `awaiting_payment`; only when `onlinePaymentsEnabled()`).
-- `400` method unavailable · `409` item unavailable or unknown · `422` · `429` · `502` Razorpay order creation failed (order set to `cancelled` / `failed`) · `500`.
+### <a id="post-apiorders"></a>`POST /api/orders`
+Rate limit 10 per 10 min per IP. Body = `orderSchema` (`src/lib/validation.ts`): customer fields (Indian mobile, 6-digit pincode, state enum) + `paymentMethod: "cod"|"razorpay"` + `items: { variantId, quantity 1..50 }[]` (1..60). Prices, totals, status, provider and payment mode are server-side only: unknown body fields are ignored.
+Every order is created with its `Payment` attempt in one insert (M2-T5, ADR 0009).
+- **COD (all modes)** `201 { order: { number, token, total } }`: status `pending_confirmation`, `paymentMode=request_only`, one `request_only` attempt (unpaid). Never marked paid automatically.
+- **Razorpay (`razorpay_test|razorpay_live`)** `201 { order, payment: { provider: "razorpay", keyId, orderId, amount, currency } }`: status `awaiting_payment`; the gateway order is created after the order/attempt exist, its id/amount/currency are validated and stored on the attempt and `Order.razorpayOrderId`.
+- **Mock (`PAYMENT_MODE=mock`, development/test only)**: the `razorpay` method creates a mock order: `201 { order, payment: { provider: "mock", orderId, amount, currency, mock: true, label: "MOCK — no money moved" } }`. No key, signature or confirm credential is ever returned. The storefront does not offer this method in mock mode (`onlinePaymentsEnabled()` is false there); it is exercised by `npm run payments:mock-checkout`.
+- `400` method unavailable (online method while online payments are off) · `409` item unavailable or unknown · `422` · `429` · `500`.
+- `502 { error }` gateway failure: *definite* (gateway refused, or its answer disagreed on amount/currency/shape): order `cancelled`, attempt `failed`, "No money has been taken". *Unknown outcome* (timeout, 5xx, 429, lost response, failure persisting the reference): `502 { error, orderNumber }`, order kept `awaiting_payment`, attempt flagged `needsReconciliation`; no gateway reference is ever returned to the client, so nothing can be paid. Resolved by `npm run payments:reconcile`.
+- Duplicate submissions create independent orders (idempotency keys and stock reservation are M3).
 
 ### <a id="payment-verify"></a>`POST /api/payments/razorpay/verify`
-Rate limit 20 per 10 min per IP (added M1). Body `{ orderNumber, token, razorpay_order_id, razorpay_payment_id, razorpay_signature }`.
+Rate limit 20 per 10 min per IP. Body `{ orderNumber, token, razorpay_order_id, razorpay_payment_id, razorpay_signature }`. An order becomes paid only after validation against server records, a valid signature, **and** a server-side gateway lookup showing the payment `captured` for this gateway order with exactly the stored amount and INR.
 | Condition | Response | DB write |
 |---|---|---|
-| order unknown, token wrong, not a Razorpay order, gateway order id mismatch | `404` | none |
-| online payments not configured or config invalid | `503` | none |
-| invalid signature | `400` | **none** (M1 fix; previously set `paymentStatus=failed`) |
-| already `paid` with the same payment id | `200 { ok: true, alreadyVerified: true }` | none |
-| already paid with a different payment id, or order not `awaiting_payment` (e.g. `cancelled`) | `409` (logged for reconciliation) | none |
-| `awaiting_payment` and `unpaid`/`failed`, valid signature | `200 { ok: true }` | conditional update → `paid`/`paid` + `razorpayPaymentId` |
-| lost a concurrent race | `200 alreadyVerified` if same payment, else `409` | none |
-Client (`CheckoutForm`) treats any non-2xx as "payment not completed" and shows the order page with `&payment=failed`.
+| order unknown, token wrong, not a Razorpay order (COD, mock, no gateway reference), gateway order id mismatch | `404` | none |
+| online payments not configured / invalid config / server not in a Razorpay mode | `503` | none |
+| `paymentMode` NULL (legacy, unclassified) · mode differs from the server's · no matching attempt · cancelled or not `awaiting_payment` · amount/currency mismatch · different payment id already paid · payment id belongs to another order/attempt | `409` (logged by order number + code) | none |
+| invalid signature | `400` | **none**, and no gateway call |
+| gateway says `authorized`/`created` | `202 { ok: false, pending: true }` | attempt flagged for reconciliation; order unchanged |
+| gateway unreachable (timeout, 5xx, 429) | `503` | attempt flagged; order unchanged; retry is safe |
+| payment unknown to the gateway, or gateway order/amount/currency differs | `409` | attempt flagged (`gateway_mismatch`); order unchanged |
+| gateway says `failed` | `400` | attempt and payment `unpaid -> failed` via the state machine (never overwrites paid); order stays `awaiting_payment` |
+| `captured`, all checks pass | `200 { ok: true }` | one transaction: attempt `paid` + `transitionOrder` (`awaiting_payment -> paid`, payment `-> paid`, actor `gateway/razorpay`, `OrderEvent`) |
+| repeat of the same payment | `200 { ok: true, alreadyVerified: true }` | none |
+| concurrent identical requests | all `200`, exactly one transition | one event |
+Client (`CheckoutForm`) treats any non-2xx as "payment not completed" (`&payment=failed`); a `202` shows the normal order page (status "Awaiting payment"). Webhooks and refunds are M10.
 
 ### `POST /api/enquiries`
 Rate limit 6 per 10 min. Body `enquirySchema`: `type: contact|business`, `name`, `email`, `phone?`, `company?`, `city?`, `interest?` (required with `phone` for business: `distributor|retail|bulk|horeca|export|franchise`), `message` 10..2000, `website` honeypot. → `201 { ok, id }` (honeypot: `201 { ok }` and nothing stored) · `422` · `429`.
@@ -74,3 +82,6 @@ Internal modules only; no HTTP contract changes. `Payment` rows are not written 
 
 ## Order payment mode (M2-T4)
 `Order.paymentMode`: `request_only` (all pay-on-delivery orders) · `mock` · `razorpay_test` · `razorpay_live` · `NULL` (legacy, unclassified). Set server-side at creation. Not in any response body today; the order page and admin show `MOCK — no money moved` for `mock`.
+
+## Reconciliation (M2-T5, ADR 0009)
+`npm run payments:reconcile` (operator, guarded like `db:*`; production needs the explicit confirmation) processes attempts flagged `needsReconciliation` for the current Razorpay mode: completes captured payments through the same code as `/verify`, attaches a gateway order found by receipt after a lost create response, cancels never-created orders only after 30 minutes and a successful empty lookup, and clears flags when nothing is settling. Prints counts only.

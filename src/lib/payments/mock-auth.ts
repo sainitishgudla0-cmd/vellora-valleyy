@@ -6,7 +6,7 @@ import { safeEqual } from "@/lib/payment-verification";
  * The endpoint requires a shared secret in `x-mock-confirm-key` matching MOCK_PAYMENT_CONFIRM_KEY (24+ chars).
  * Without the variable the endpoint does not exist (404). The mode check alone is never authorisation.
  */
-export const MOCK_CONFIRM_HEADER = "x-mock-confirm-key";
+export { MOCK_CONFIRM_HEADER } from "./labels";
 const MIN_KEY_LENGTH = 24;
 
 export function mockConfirmKeyConfigured(env: NodeJS.ProcessEnv = process.env) {

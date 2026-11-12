@@ -45,3 +45,14 @@ export const confirmBody = (f: { order: { number: string }; token: string; provi
 export async function cleanupFixtures() {
   await db.order.deleteMany({ where: { number: { startsWith: FIXTURE_PREFIX } } }); // cascades to Payment and OrderEvent
 }
+
+/** Razorpay-mode fixture: order + pending attempt with a gateway reference, as `POST /api/orders` leaves them. */
+export async function createRazorpayOrderWithAttempt(over: { mode?: PaymentMode | null; status?: OrderStatus; paymentStatus?: PaymentStatus; total?: number; providerOrderId?: string | null; attemptAmount?: number } = {}) {
+  const order = await createFixtureOrder({ paymentMode: over.mode === undefined ? "razorpay_test" : over.mode, status: over.status, paymentStatus: over.paymentStatus, total: over.total });
+  const providerOrderId = over.providerOrderId === undefined ? `order_fixture${order.number.slice(-6).replace(/\W/g, "")}${seq}` : over.providerOrderId;
+  if (providerOrderId) await db.order.update({ where: { id: order.id }, data: { razorpayOrderId: providerOrderId } });
+  const attempt = await db.payment.create({
+    data: { orderId: order.id, provider: "razorpay", mode: over.mode === undefined || over.mode === null ? "razorpay_test" : over.mode, providerOrderId, amount: over.attemptAmount ?? order.total, currency: "INR" },
+  });
+  return { order, attempt, token: order.accessToken, providerOrderId };
+}

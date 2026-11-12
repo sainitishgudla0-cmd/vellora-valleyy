@@ -48,7 +48,7 @@ describe("full order transition matrix", () => {
       it(`${from} → ${to} is ${allowed ? "allowed" : "rejected"}`, () => {
         expect(canTransitionOrder(from, to)).toBe(allowed);
         // Use a system actor with a reason so only the graph can reject.
-        const r = validateTransition({ from, to, actor: SYSTEM, reason: "test" });
+        const r = validateTransition({ from, to, actor: SYSTEM, reason: "test", ...(to === "paid" && from !== to ? { payment: { from: "unpaid" as const, to: "paid" as const } } : {}) });
         if (from === to) expect(r?.code).toBe("invalid_transition");
         else if (!allowed) expect(r?.code).toBe("invalid_transition");
         else expect(r).toBeNull();
@@ -76,7 +76,7 @@ describe("full payment transition matrix", () => {
 });
 
 describe("actor and reason rules", () => {
-  const ok = (over: object) => validateTransition({ from: "awaiting_payment", to: "paid", actor: GATEWAY, ...over });
+  const ok = (over: object) => validateTransition({ from: "awaiting_payment", to: "paid", payment: { from: "unpaid", to: "paid" }, actor: GATEWAY, ...over });
 
   it("only gateway/system may mark an order paid or a payment paid (no manual or automatic offline confirmation)", () => {
     expect(ok({})).toBeNull();
@@ -104,6 +104,14 @@ describe("actor and reason rules", () => {
     expect(validateTransition({ from: "paid", to: "cancelled", actor: SYSTEM })?.code).toBe("reason_required");
     expect(validateTransition({ from: "paid", to: "paid", payment: { from: "paid", to: "refunded" }, actor: SYSTEM })?.code).toBe("reason_required");
     expect(validateTransition({ from: "pending_confirmation", to: "cancelled", actor: SYSTEM, reason: "x".repeat(501) })?.code).toBe("invalid_reason");
+  });
+
+  it("enforces combined order/payment invariants", () => {
+    expect(validateTransition({ from: "awaiting_payment", to: "paid", actor: GATEWAY })?.code).toBe("invalid_transition");
+    expect(validateTransition({ from: "awaiting_payment", to: "paid", payment: { from: "unpaid", to: "failed" }, actor: GATEWAY })?.code).toBe("invalid_transition");
+    expect(validateTransition({ from: "awaiting_payment", to: "cancelled", payment: { from: "unpaid", to: "paid" }, actor: GATEWAY, reason: "x" })?.code).toBe("invalid_transition");
+    expect(validateTransition({ from: "cancelled", to: "cancelled", payment: { from: "unpaid", to: "paid" }, actor: GATEWAY, reason: "x" })?.code).toBe("invalid_transition");
+    expect(validateTransition({ from: "awaiting_payment", to: "cancelled", payment: { from: "unpaid", to: "failed" }, actor: SYSTEM, reason: "gateway rejected" })).toBeNull();
   });
 
   it("rejects a no-op", () => {
@@ -159,7 +167,7 @@ describe("transitionOrder", () => {
   it("returns stale_state with the current statuses and writes no event when the order moved", async () => {
     tx.order.updateMany.mockResolvedValue({ count: 0 });
     tx.order.findUnique.mockResolvedValue({ status: "cancelled", paymentStatus: "unpaid" });
-    const r = await transitionOrder({ orderId: "o1", from: "awaiting_payment", to: "paid", actor: GATEWAY });
+    const r = await transitionOrder({ orderId: "o1", from: "awaiting_payment", to: "paid", payment: { from: "unpaid", to: "paid" }, actor: GATEWAY });
     expect(r).toMatchObject({ ok: false, code: "stale_state", current: { status: "cancelled", paymentStatus: "unpaid" } });
     expect(tx.orderEvent.create).not.toHaveBeenCalled();
   });

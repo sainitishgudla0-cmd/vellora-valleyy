@@ -3,15 +3,14 @@
 _Read this first in a new session. Keep it under ~80 lines. Scope and AC per task: `BACKEND-ROADMAP.md`._
 
 ## Current
-- **Milestone:** M2 in progress on `backend/m2-payments`. M2-T1..T4 done. T5+ need approval.
-- **Branch:** M1 is integrated: `backend/development` = `52f561a` (M2-T3 integrated by fast-forward, no PR workflow). CI green (run 43145834588). Working copy moved to `~/Developer/Velora-Valley` (the Desktop copy is iCloud-synced and spawns duplicate files). `main` = `55aa848`, untouched.
+- **Milestone:** M2 in progress on `backend/m2-payments`. M2-T1..T5 done. T6 needs approval.
+- **Branch:** M1 is integrated: `backend/development` = `0bd8610` (M2-T4 integrated by fast-forward, no PR workflow). CI green (run 43149083744). Working copy moved to `~/Developer/Velora-Valley` (the Desktop copy is iCloud-synced and spawns duplicate files). `main` = `55aa848`, untouched.
 - **Last verified:** 2026-11-11, `npm run verify:full` on throwaway Postgres 16 (127.0.0.1): all gates green. See the M1 evidence below.
 
 ## Next up
 | Task | Status | Notes |
 |---|---|---|
-| M2-T5 move routes onto providers + state machine | proposed (needs approval) | next; checkout must create mock orders/attempts (`Order.paymentMode`, `Payment`) and a server-side/dev-only trigger for `mock/confirm` (browser cannot hold the key); lowers the ratchet; `Order.paymentMode` for `/verify` Razorpay orders |
-| M2-T6 | proposed | see `BACKEND-ROADMAP.md` M2 |
+| M2-T6 admin PATCH + staff payment confirmation | proposed (needs approval) | admin PATCH via `transitionOrder` (409 on invalid), payment-reference capture + audited manual confirmation (opens `paid` to an admin actor), empties the ratchet's legacy list |
 
 ## Blockers / open items
 1. **Preview DB isolation unverified.** Vercel project settings weren't accessible (local CLI account can't see the production team; Vercel MCP unauthorised). GitHub shows no Vercel deployments or statuses for this repo, so previews don't appear to be Git-triggered. M1 builds are DB-write-free regardless; reads during a preview build would still use whatever `DATABASE_URL` preview has. Owner: user (Vercel dashboard).
@@ -22,6 +21,14 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 6. Local Node is 20.19.6; project targets 24 (`.nvmrc`, CI uses 24).
 
 ## Done
+### M2-T5 — order/payment integration (ADR 0009)
+- `createOrder` inserts order + `Payment` attempt atomically (COD → `request_only`; mock → mock attempt; Razorpay → pending attempt). `/api/orders` uses `startOnlinePayment`: gateway call outside any transaction; definite failure → cancel via `transitionOrder`; unknown outcome → keep `awaiting_payment`, flag `needsReconciliation`, 502 + order number. Razorpay payload unchanged; mock payload simulated and secret-free.
+- `/api/payments/razorpay/verify` → `verifyRazorpayCheckout`: server records + `paymentMode` match + attempt, HMAC, then server-side `GET /payments/{id}` must be `captured` with same gateway order/amount/INR; 202 pending, 503 unreachable, 409 conflicts, idempotent success; paid transition = attempt claim + `transitionOrder` in one transaction. Legacy `paymentMode` NULL → 409 (manual). State machine gained combined-state invariants.
+- Recovery: `reconcile.ts` + `npm run payments:reconcile` (guarded). Dev runner `npm run payments:mock-checkout` (real API, key only in its own process). `MOCK_PAYMENT_CONFIRM_KEY` rejected in preview/production. Additive migration `payment_reconciliation`. `scripts/e2e-ui.mjs` made Node-24-safe (dynamic import).
+- Tests: 5 new/rewritten integration files (`checkout-flows`, `razorpay-verify` 30, `reconcile` 7, plus updated mock/state-machine) with `tests/support/fake-razorpay.ts` (throws on any non-Razorpay host); unit: gateway adapter, config, ratchet rewritten to classify status vs non-status writers. Mutation checks: treating `authorized` as captured, or skipping the amount/order match, makes tests fail.
+- **Evidence (2026-11-12, Node 24.22.3, throwaway Postgres 16.13, fresh DB):** `verify:full` + `VERIFY_UI=1` → typecheck ✓ · unit 219/219 ✓ · env ✓ · migrate deploy ✓ · schema diff none ✓ · integration 122/122 ✓ · build ✓ · smoke 41/0 ✓ · UI 51/0 ✓; `npm audit --omit=dev` 0. Dev runner exercised against a local `next start` (mock mode): order created as mock, confirmed, repeat idempotent; wrong key → 401.
+- Direct status writers left: admin PATCH only (ratchet). Not centralized until M2-T6.
+- Risks/deferred: M3 (order idempotency keys, stock reservation); M10 (webhooks, refunds; reconciliation is operator-run); in-flight orders at deploy → manual (runbook); Razorpay REST shapes verified against fakes only (confirm the `receipt` list filter in test mode); build still fetches Google Fonts.
 ### M2-T4 — mock payment confirmation + order payment mode (ADR 0008)
 - `Order.paymentMode` (nullable; legacy NULL, never guessed; set server-side by `resolveOrderPaymentMode` in `createOrder`: COD → `request_only`, online → configured mode) with DB CHECKs (mode/method pairing, mock orders cannot hold Razorpay ids, `Payment` provider/mode pairing, mock payments only `mock_pay_*` ids). Migration `20261112031641_order_payment_mode` (additive).
 - `POST /api/payments/mock/confirm`: 404 unless server mode is `mock` in development/test and `MOCK_PAYMENT_CONFIRM_KEY` is set; rate limit → `x-mock-confirm-key` (401) → strict body (422) → `confirmMockPayment`: order must be a mock order with a matching mock attempt, valid proof, amount/currency match; Payment claim + `transitionOrder` (new optional `tx` param) in one transaction; idempotent; cancelled/stale/mismatch → 409.

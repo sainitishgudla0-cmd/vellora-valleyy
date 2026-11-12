@@ -70,3 +70,24 @@ describe("resolvePaymentConfig — rejected combinations", () => {
     expect(issuesOf(env as Record<string, string>)).toMatch(pattern);
   });
 });
+
+describe("MOCK_PAYMENT_CONFIRM_KEY (mock-only credential)", () => {
+  const KEY = { MOCK_PAYMENT_CONFIRM_KEY: "unit-test-confirm-key-0123456789" };
+  it.each(["preview", "production"])("is rejected when APP_ENV=%s, in every mode", (appEnv) => {
+    for (const PAYMENT_MODE of ["request_only", "razorpay_test", "razorpay_live", "mock"]) {
+      expect(() => resolvePaymentConfig({ VERCEL_ENV: appEnv, PAYMENT_MODE, RAZORPAY_LIVE_ENABLED: "true", ...(PAYMENT_MODE === "razorpay_live" ? LIVE_KEYS : TEST_KEYS), ...KEY })).toThrow(PaymentConfigError);
+    }
+    expect(issuesOf({ VERCEL_ENV: appEnv, ...KEY })).toMatch(/MOCK_PAYMENT_CONFIRM_KEY must not be set/);
+  });
+  it("is allowed in development/test with mock, and warns (no effect) with other modes", () => {
+    expect(resolvePaymentConfig({ APP_ENV: "test", PAYMENT_MODE: "mock", ...KEY }).warnings).toEqual([]);
+    expect(resolvePaymentConfig({ APP_ENV: "development", PAYMENT_MODE: "request_only", ...KEY }).warnings[0]).toMatch(/no effect/);
+  });
+  it("an empty value is treated as unset (production default env stays valid)", () => {
+    expect(resolvePaymentConfig({ VERCEL_ENV: "production", MOCK_PAYMENT_CONFIRM_KEY: "" }).mode).toBe("request_only");
+  });
+  it("checkout needs no mock key: production request_only and razorpay_live resolve without it", () => {
+    expect(resolvePaymentConfig({ VERCEL_ENV: "production" }).mode).toBe("request_only");
+    expect(resolvePaymentConfig({ VERCEL_ENV: "production", PAYMENT_MODE: "razorpay_live", RAZORPAY_LIVE_ENABLED: "true", ...LIVE_KEYS }).mode).toBe("razorpay_live");
+  });
+});

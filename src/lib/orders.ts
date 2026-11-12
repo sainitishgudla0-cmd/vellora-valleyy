@@ -4,7 +4,8 @@ import { db } from "./db";
 import { site } from "@/config/site";
 import type { OrderInput } from "./validation";
 import { resolveOrderPaymentMode } from "./orders/payment-mode";
-import { safePaymentConfig } from "./payments";
+import { currentPaymentProvider, safePaymentConfig } from "./payments";
+import { mockProviderOrderId } from "./payments/providers/mock";
 
 export class OrderError extends Error {
   constructor(message: string, public status = 400) {
@@ -52,12 +53,28 @@ export async function createOrder(input: OrderInput) {
   const total = subtotal + deliveryFee;
 
   const isOnline = input.paymentMethod === "razorpay";
-  // server-resolved (trusted configuration); the request body has no say in the mode
-  const paymentMode = resolveOrderPaymentMode(input.paymentMethod, safePaymentConfig());
+  // Mode and provider come from trusted server configuration; the request body has no say in either.
+  const config = safePaymentConfig();
+  const paymentMode = resolveOrderPaymentMode(input.paymentMethod, config);
   if (!paymentMode) throw new OrderError("This payment method is not available.", 400);
+  const provider = isOnline ? currentPaymentProvider() : null;
+  if (isOnline && (!provider || !provider.online || provider.mode !== paymentMode)) throw new OrderError("This payment method is not available.", 400);
+
+  const number = orderNumber();
+  // Every order gets its payment attempt in the same insert (atomic): pay-on-delivery a `request_only`
+  // record that stays unpaid; mock an attempt with its deterministic simulated reference; Razorpay a pending
+  // attempt whose gateway reference is attached after the (non-transactional) gateway call.
+  const attempt = {
+    provider: provider ? provider.id : ("request_only" as const),
+    mode: paymentMode,
+    providerOrderId: provider?.id === "mock" ? mockProviderOrderId(number) : null,
+    amount: total,
+    currency: "INR",
+    status: "unpaid" as const,
+  };
   return db.order.create({
     data: {
-      number: orderNumber(),
+      number,
       accessToken: crypto.randomBytes(18).toString("base64url"),
       status: isOnline ? "awaiting_payment" : "pending_confirmation",
       paymentMethod: input.paymentMethod,
@@ -76,8 +93,9 @@ export async function createOrder(input: OrderInput) {
       deliveryFee,
       total,
       items: { create: items },
+      payments: { create: attempt },
     },
-    include: { items: true },
+    include: { items: true, payments: true },
   });
 }
 

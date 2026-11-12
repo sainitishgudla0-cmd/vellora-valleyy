@@ -5,7 +5,7 @@ import { PAYMENT_MODES, resolvePaymentConfig, type PaymentConfig } from "@/lib/e
 import { providerForConfig, ProviderUnavailableError } from "@/lib/payments/providers";
 import { createRequestOnlyProvider } from "@/lib/payments/providers/request-only";
 import { MOCK_LABEL, createMockProvider, mockProof } from "@/lib/payments/providers/mock";
-import { createRazorpayProvider, verifyRazorpaySignatureWith } from "@/lib/payments/providers/razorpay";
+import { GatewayError, createRazorpayGateway, createRazorpayProvider, verifyRazorpaySignatureWith } from "@/lib/payments/providers/razorpay";
 import { recordPaymentAttempt } from "@/lib/payments/records";
 
 const REQ = { orderNumber: "VV-1", amountPaise: 105000, currency: "INR" as const };
@@ -82,7 +82,7 @@ describe("razorpay provider", () => {
   });
   it("surfaces gateway failures", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 500 })));
-    await expect(createRazorpayProvider(config).createPayment(REQ)).rejects.toThrow("Razorpay order creation failed (500)");
+    await expect(createRazorpayProvider(config).createPayment(REQ)).rejects.toThrow("Gateway unavailable (500)");
   });
   it("verifies signatures in constant time and rejects tampering", () => {
     const p = createRazorpayProvider(config);
@@ -120,5 +120,49 @@ describe("recordPaymentAttempt", () => {
   });
   it.each([0, -5, 10.5, NaN])("rejects amount %s", (amountPaise) => {
     expect(() => recordPaymentAttempt({ id: "mock", mode: "mock" }, "o1", { providerOrderId: "x", amountPaise, currency: "INR" }, client() as never)).toThrow(RangeError);
+  });
+});
+
+
+describe("razorpay gateway adapter", () => {
+  const gw = () => createRazorpayGateway({ keyId: "rzp_test_abc123", keySecret: "fake_secret_for_tests" });
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+  const kindOf = async (p: Promise<unknown>) => p.then(() => "ok", (e) => (e instanceof GatewayError ? e.kind : "other"));
+
+  it("classifies failures: timeouts/5xx/429 unknown, 4xx rejected, 404 not_found, bad bodies invalid", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new DOMException("t", "TimeoutError"); }));
+    expect(await kindOf(gw().createOrder(100, "r"))).toBe("unavailable");
+    for (const [status, kind] of [[500, "unavailable"], [502, "unavailable"], [429, "unavailable"], [400, "rejected"], [401, "rejected"], [404, "not_found"]] as const) {
+      vi.stubGlobal("fetch", vi.fn(async () => json({}, status)));
+      expect(await kindOf(gw().fetchPayment("pay_1"))).toBe(kind);
+    }
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("<html>", { status: 200 })));
+    expect(await kindOf(gw().fetchPayment("pay_1"))).toBe("invalid_response");
+    vi.stubGlobal("fetch", vi.fn(async () => json({ id: "pay_1" })));
+    expect(await kindOf(gw().fetchPayment("pay_1"))).toBe("invalid_response");
+  });
+
+  it("sends a timeout signal and never leaks the key into errors", async () => {
+    const f = vi.fn(async (_u: string, init?: RequestInit) => { expect(init?.signal).toBeInstanceOf(AbortSignal); throw new Error("rzp_test_abc123:fake_secret_for_tests exploded"); });
+    vi.stubGlobal("fetch", f);
+    const e = (await gw().createOrder(100, "r").catch((x: unknown) => x)) as Error;
+    expect(e).toBeInstanceOf(GatewayError);
+    expect(e.message).not.toContain("fake_secret");
+    expect(f).toHaveBeenCalled();
+  });
+
+  it("encodes path segments", async () => {
+    const f = vi.fn(async () => json({ id: "p", status: "captured", amount: 1, currency: "INR", order_id: "o" }));
+    vi.stubGlobal("fetch", f);
+    await gw().fetchPayment("pay/../x");
+    expect((f.mock.calls[0] as unknown as [string])[0]).toBe("https://api.razorpay.com/v1/payments/pay%2F..%2Fx");
+  });
+
+  it("the provider rejects a gateway order that echoes a different amount or currency", async () => {
+    const config = cfg({ APP_ENV: "test", PAYMENT_MODE: "razorpay_test", ...TEST_KEYS });
+    for (const bad of [{ id: "order_1", amount: 1, currency: "INR" }, { id: "order_1", amount: 105000, currency: "USD" }]) {
+      vi.stubGlobal("fetch", vi.fn(async () => json(bad)));
+      expect(await kindOf(createRazorpayProvider(config).createPayment(REQ))).toBe("invalid_response");
+    }
   });
 });

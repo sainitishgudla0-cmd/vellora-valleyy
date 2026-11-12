@@ -125,20 +125,26 @@ enum PaymentMode {
 
 /// One payment attempt for an order. Amounts are integer paise.
 model Payment {
-  id                String          @id @default(cuid())
-  orderId           String
-  order             Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  provider          PaymentProvider
-  mode              PaymentMode
-  providerOrderId   String?
-  providerPaymentId String?         @unique
-  amount            Int
-  currency          String          @default("INR")
-  status            PaymentStatus   @default(unpaid)
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
+  id                  String          @id @default(cuid())
+  orderId             String
+  order               Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider            PaymentProvider
+  mode                PaymentMode
+  providerOrderId     String?
+  providerPaymentId   String?         @unique
+  amount              Int
+  currency            String          @default("INR")
+  status              PaymentStatus   @default(unpaid)
+  /// Set when the gateway outcome is unknown/pending (timeout, authorized-not-captured, lost response); cleared when resolved. See src/lib/payments/reconcile.ts.
+  needsReconciliation Boolean         @default(false)
+  /// Short machine code for why (never gateway payloads or customer data).
+  reconcileReason     String?
+  lastCheckedAt       DateTime?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
 
   @@index([orderId])
+  @@index([needsReconciliation, createdAt])
   @@index([providerOrderId])
 }
 
