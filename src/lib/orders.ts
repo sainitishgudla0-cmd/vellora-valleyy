@@ -50,7 +50,7 @@ function isUniqueViolationOn(e: unknown, column: string) {
  * insert the order, its lines and its payment attempt, and claim the idempotency key if one was sent. Any failure
  * rolls all of it back, so a refused order never leaves a hold behind.
  */
-export async function createOrder(input: OrderInput, opts: { idempotency?: IdempotencyClaim } = {}) {
+export async function createOrder(input: OrderInput, opts: { idempotency?: IdempotencyClaim; customerId?: string | null } = {}) {
   // merge duplicate lines
   const qty = new Map<string, number>();
   for (const i of input.items) qty.set(i.variantId, Math.min(50, (qty.get(i.variantId) ?? 0) + i.quantity));
@@ -65,7 +65,7 @@ export async function createOrder(input: OrderInput, opts: { idempotency?: Idemp
 
   for (let attempt = 1; ; attempt++) {
     try {
-      return await db.$transaction((tx) => insertOrder(tx, input, qty, paymentMode, provider?.id ?? null, opts.idempotency), { maxWait: 5_000, timeout: 15_000 });
+      return await db.$transaction((tx) => insertOrder(tx, input, qty, paymentMode, provider?.id ?? null, opts.idempotency, opts.customerId ?? null), { maxWait: 5_000, timeout: 15_000 });
     } catch (e) {
       if (opts.idempotency && isUniqueViolationOn(e, "keyHash")) throw new IdempotencyConflictError();
       if (isUniqueViolationOn(e, "number") && attempt < MAX_ORDER_NUMBER_ATTEMPTS) continue; // fresh number, whole transaction retried
@@ -82,6 +82,7 @@ async function insertOrder(
   paymentMode: NonNullable<ReturnType<typeof resolveOrderPaymentMode>>,
   providerId: "mock" | "razorpay" | "request_only" | null,
   claim: IdempotencyClaim | undefined,
+  customerId: string | null,
 ) {
   if (claim) {
     const now = new Date();
@@ -135,6 +136,7 @@ async function insertOrder(
       paymentMethod: input.paymentMethod,
       paymentStatus: "unpaid",
       paymentMode,
+      customerId,
       customerName: input.customerName,
       email: input.email,
       phone: input.phone,

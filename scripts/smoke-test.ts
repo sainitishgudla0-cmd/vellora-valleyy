@@ -146,6 +146,14 @@ async function main() {
     console.log("  (skipping authenticated admin checks — ADMIN_PASSWORD not set)");
   }
 
+  console.log("\nCustomer accounts");
+  check("account without a session → 401", (await req("/api/account/me")).status === 401);
+  check("account orders without a session → 401", (await req("/api/account/orders")).status === 401);
+  const otp = await req("/api/account/otp/request", { method: "POST", json: { email: "smoke.account@example.com" } });
+  check("sign-in code request: 503 without a sender (never a real send), or 202 on a mock-mode dev server", otp.status === 503 || otp.status === 202, otp.status);
+  check("sign-in code verify with a wrong code → 401", (await req("/api/account/otp/verify", { method: "POST", json: { email: "smoke.account@example.com", code: "000000" } })).status === 401);
+  check("sign-in rejects bad input → 422", (await req("/api/account/otp/request", { method: "POST", json: { email: "nope" } })).status === 422);
+
   console.log("\nPages");
   for (const p of ["/", "/shop", "/shop?category=dates", "/product/safawi-dates", "/cart", "/checkout", "/our-story", "/quality", "/contact", "/business", "/admin"]) {
     const r = await req(p);

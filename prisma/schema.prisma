@@ -165,10 +165,14 @@ model Order {
   payments           Payment[]
   inventoryMovements InventoryMovement[]
   idempotencyKey     IdempotencyKey?
+  /// Set only server-side, from a signed-in customer's session or an explicit claim (M5). SetNull keeps the order if the account is erased.
+  customerId         String?
+  customer           Customer?           @relation(fields: [customerId], references: [id], onDelete: SetNull)
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
 
   @@index([status, createdAt])
+  @@index([customerId, createdAt])
 }
 
 /// Which integration handled a payment attempt (src/lib/payments/providers).
@@ -343,4 +347,84 @@ model AuditLog {
   @@index([createdAt])
   @@index([actorUserId, createdAt])
   @@index([targetType, targetId])
+}
+
+/// A shopper's account (M5, ADR 0013). Sign-in is by emailed one-time code; there is no password.
+model Customer {
+  id               String            @id @default(cuid())
+  /// lower-cased; verified by the sign-in code
+  email            String            @unique
+  name             String?
+  phone            String?
+  marketingConsent Boolean           @default(false)
+  lastLoginAt      DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  sessions         CustomerSession[]
+  addresses        Address[]
+  consents         ConsentRecord[]
+  orders           Order[]
+}
+
+/// Server-side customer session; only a keyed hash of the cookie token is stored (same scheme as AdminSession).
+model CustomerSession {
+  id         String    @id @default(cuid())
+  customerId String
+  customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  userAgent  String?
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+
+  @@index([customerId])
+  @@index([expiresAt])
+}
+
+model Address {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  label      String?
+  name       String
+  phone      String
+  line1      String
+  line2      String?
+  city       String
+  state      String
+  pincode    String
+  /// at most one per customer (partial unique index in the migration)
+  isDefault  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([customerId])
+}
+
+/// One emailed sign-in code. Neither the address nor the code is stored in the clear: both are keyed hashes.
+model OtpChallenge {
+  id         String    @id @default(cuid())
+  emailHash  String
+  codeHash   String
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([emailHash, createdAt])
+  @@index([expiresAt])
+}
+
+/// Append-only consent history (DPDP Act 2023): what was agreed (`terms_privacy` or `marketing`), which notice version, when.
+model ConsentRecord {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  purpose    String
+  granted    Boolean
+  version    String
+  createdAt  DateTime @default(now())
+
+  @@index([customerId, createdAt])
 }

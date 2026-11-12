@@ -1,9 +1,8 @@
 import "server-only";
 import { db } from "@/lib/db";
-import type { AdminContext } from "./admin";
 
 /**
- * Audit trail for admin logins and mutations (M4-T5, ADR 0012). Rows are append-only and hold ids and changed field
+ * Audit trail for admin logins and mutations (M4-T5, ADR 0012) and privacy-relevant customer actions (M5). Rows are append-only and hold ids and changed field
  * names only: never passwords, tokens, free-text reasons or customer data. A failed audit write is logged (without
  * its contents) and never turns a finished mutation into an error response.
  */
@@ -12,7 +11,8 @@ export type AuditOutcome = "success" | "rejected" | "denied" | "failed";
 export interface AuditEntry {
   action: string;
   outcome: AuditOutcome;
-  admin?: Pick<AdminContext, "userId" | "label" | "role"> | null;
+  /** the acting admin, or `{ userId: null, label: "customer:<id>", role: "customer" }` for a customer-initiated change */
+  admin?: { userId: string | null; label: string; role: string } | null;
   targetType?: string;
   targetId?: string;
   details?: Record<string, unknown>;

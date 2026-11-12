@@ -15,6 +15,8 @@ const LEGACY_STATUS_WRITERS: Record<string, number> = {}; // M2-T6 moved the adm
 const NON_STATUS_WRITERS: Record<string, number> = {
   "src/lib/payments/checkout.ts": 1, // attaches Order.razorpayOrderId after the gateway call
   "src/lib/payments/reconcile.ts": 1, // same, for a lost create response
+  "src/lib/account/claim.ts": 2, // links a guest order to a verified customer (customerId only)
+  "src/lib/account/erasure.ts": 1, // anonymises an erased customer's orders (personal fields only)
 };
 const IMPLEMENTATION = new Set(["src/lib/orders/state-machine.ts"]);
 const START = /\b(?:db|tx|prisma)\.order\.(?:update|updateMany|upsert)\s*\(|\$executeRaw[A-Za-z]*\s*[`(]/g;

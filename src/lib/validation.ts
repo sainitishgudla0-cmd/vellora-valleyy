@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const phone = z
+export const phone = z
   .string()
   .trim()
   .transform((s) => s.replace(/[\s-]/g, ""))

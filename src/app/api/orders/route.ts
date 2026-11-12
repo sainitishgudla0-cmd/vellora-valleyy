@@ -5,6 +5,7 @@ import { createOrder, IdempotencyConflictError, OrderError } from "@/lib/orders"
 import { hashKey, hashRequest, lookupKey, readIdempotencyKey, storeResponse, type StoredKey } from "@/lib/orders/idempotency";
 import { currentPaymentProvider } from "@/lib/payments";
 import { startOnlinePayment } from "@/lib/payments/checkout";
+import { customerFromRequest } from "@/lib/auth/customer";
 import { rateLimit } from "@/lib/rate-limit";
 import { site } from "@/config/site";
 
@@ -32,7 +33,9 @@ export async function POST(req: Request) {
       const earlier = await lookupKey(claim.keyHash, claim.requestHash);
       if (earlier.kind !== "none") return fromStored(earlier);
     }
-    const order = await createOrder(input, { idempotency: claim });
+    // Signed-in shoppers get the order linked to their account. The id comes from the session cookie only, never from the body.
+    const customer = await customerFromRequest(req);
+    const order = await createOrder(input, { idempotency: claim, customerId: customer?.customerId });
     const summary = { number: order.number, token: order.accessToken, total: order.total };
     if (input.paymentMethod !== "razorpay") return respond(claim?.keyHash, { order: summary }, 201);
 
