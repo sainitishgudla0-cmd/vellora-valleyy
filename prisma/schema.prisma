@@ -175,6 +175,15 @@ model Order {
   businessAccountId  String?
   businessAccount    BusinessAccount?    @relation(fields: [businessAccountId], references: [id], onDelete: SetNull)
   quote              Quote?
+  /// GST snapshot of the delivery charge and the supply type, taken at creation (NULL when no rate was configured).
+  supplyType         String?
+  deliveryGstRateBp  Int?
+  deliveryTaxable    Int?
+  deliveryCgst       Int?
+  deliverySgst       Int?
+  deliveryIgst       Int?
+  invoice            Invoice?
+  shipments          Shipment[]
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
 
@@ -265,6 +274,13 @@ model OrderItem {
   unitPrice    Int
   quantity     Int
   lineTotal    Int
+  /// GST snapshot (M7, ADR 0015). NULL = no tax rate was configured when the order was placed; the invoice computes it from the rates in force on the order date.
+  hsCode       String?
+  gstRateBp    Int?
+  taxableValue Int?
+  cgst         Int?
+  sgst         Int?
+  igst         Int?
 }
 
 model Enquiry {
@@ -585,4 +601,130 @@ model QuoteEvent {
   createdAt  DateTime       @default(now())
 
   @@index([quoteId, createdAt])
+}
+
+/// GST rate for an HSN code (4, 6 or 8 digits; the most specific match wins) or the reserved code DELIVERY, from `effectiveFrom`. Append-only: a rate change is a new row. (M7, ADR 0015)
+model TaxRate {
+  id            String   @id @default(cuid())
+  code          String
+  /// basis points: 500 = 5.00%
+  rateBp        Int
+  effectiveFrom DateTime @db.Date
+  note          String?
+  createdAt     DateTime @default(now())
+
+  @@unique([code, effectiveFrom])
+}
+
+/// Gap-free invoice counter per financial year (April-March), advanced in the same transaction as the invoice row.
+model InvoiceSeries {
+  financialYear String @id
+  lastSeq       Int    @default(0)
+}
+
+/// An issued tax invoice. `payload` is the frozen, canonical snapshot the PDF is rendered from (never recomputed), so an invoice regenerates byte-for-byte.
+model Invoice {
+  id            String   @id @default(cuid())
+  number        String   @unique
+  financialYear String
+  seq           Int
+  orderId       String   @unique
+  order         Order    @relation(fields: [orderId], references: [id])
+  issuedAt      DateTime
+  supplyType    String
+  taxableTotal  Int
+  cgstTotal     Int
+  sgstTotal     Int
+  igstTotal     Int
+  total         Int
+  buyerGstin    String?
+  payload       String
+  createdAt     DateTime @default(now())
+
+  @@unique([financialYear, seq])
+}
+
+/// Delivery serviceability and fee by pincode prefix. With NO active rules the legacy behaviour applies (site fee, everywhere); with any rule, an order's pincode needs a matching rule.
+model ShippingRule {
+  id                String   @id @default(cuid())
+  name              String
+  /// 1-6 digits; empty = catch-all. The longest matching prefix wins.
+  pincodePrefix     String   @default("")
+  serviceable       Boolean  @default(true)
+  /// paise
+  fee               Int      @default(0)
+  /// subtotal (paise) from which the fee is waived
+  freeAboveSubtotal Int?
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([pincodePrefix])
+}
+
+enum ShipmentStatus {
+  created
+  picked_up
+  in_transit
+  out_for_delivery
+  delivered
+  failed
+  returned
+}
+
+model Shipment {
+  id          String          @id @default(cuid())
+  orderId     String
+  order       Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  courier     String
+  awb         String
+  trackingUrl String?
+  status      ShipmentStatus  @default(created)
+  events      ShipmentEvent[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@unique([courier, awb])
+  @@index([orderId])
+}
+
+model ShipmentEvent {
+  id         String         @id @default(cuid())
+  shipmentId String
+  shipment   Shipment       @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  status     ShipmentStatus
+  note       String?
+  createdAt  DateTime       @default(now())
+
+  @@index([shipmentId, createdAt])
+}
+
+enum OutboxStatus {
+  pending
+  sending
+  sent
+  failed
+  dead
+}
+
+/// Transactional notification queue (M7-T5). Written in the same transaction as the event it announces (dedupeKey makes that idempotent);
+/// content is rendered from the database at send time, so no personal data or order links are copied here.
+model OutboxMessage {
+  id            String       @id @default(cuid())
+  channel       String       @default("email")
+  template      String
+  /// the order or quote the message is about
+  subjectType   String
+  subjectId     String
+  dedupeKey     String       @unique
+  status        OutboxStatus @default(pending)
+  attempts      Int          @default(0)
+  nextAttemptAt DateTime     @default(now())
+  claimedAt     DateTime?
+  sentAt        DateTime?
+  /// short machine code, never a recipient or provider payload
+  lastError     String?
+  createdAt     DateTime     @default(now())
+
+  @@index([status, nextAttemptAt])
 }

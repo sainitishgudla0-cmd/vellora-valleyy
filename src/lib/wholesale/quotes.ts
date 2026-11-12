@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { createOrder, OrderError } from "@/lib/orders";
 import type { OrderInput } from "@/lib/validation";
 import { site } from "@/config/site";
+import { enqueueOutbox } from "@/lib/notify/outbox";
 import { creditCheck, loadQuantityTerms } from "./pricing";
 import { transitionQuote } from "./quote-machine";
 import { NO_RESTRICTION, quantityProblem } from "./rules";
@@ -137,6 +138,7 @@ export async function priceQuote(quoteId: string, pricing: QuotePricing, adminId
     const total = subtotal + deliveryFee;
     const t = await transitionQuote(tx, { quoteId, from: q.status, to: "quoted", actor: { type: "admin", id: adminId }, data: { subtotal, deliveryFee, total, validUntil, quotedAt: now, buyerNote: pricing.buyerNote?.trim() || null } });
     if (!t.ok) throw new QuoteAbort(t.code === "invalid_transition" ? "invalid_transition" : "stale_state", t.message); // rolls back the item prices too
+    await enqueueOutbox(tx, { template: "quote_ready", subjectType: "quote", subjectId: quoteId, dedupeKey: `quote-quoted:${quoteId}:${now.getTime()}` });
     return { ok: true as const, quote: { number: q.number, status: "quoted", total, validUntil } };
   }).catch((e) => {
     if (e instanceof QuoteAbort) return fail(e.code, e.message);

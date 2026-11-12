@@ -163,6 +163,16 @@ async function main() {
   const retailCart = await req("/api/cart/validate", { method: "POST", json: { variantIds: [v1.id] } });
   check("retail cart validate has no wholesale fields", retailCart.status === 200 && Object.keys(retailCart.body.variants[0]).sort().join() === "available,id,mrp,price");
 
+  console.log("\nGST, shipping, invoices");
+  const sq = await req("/api/shipping/quote?pincode=515001&subtotal=1000");
+  check("shipping quote answers (legacy mode: served, default fee)", sq.status === 200 && sq.body.serviceable === true && typeof sq.body.fee === "number", sq.status);
+  check("shipping quote validates the pincode → 422", (await req("/api/shipping/quote?pincode=12")).status === 422);
+  check("admin tax rates without a session → 401", (await req("/api/admin/tax-rates")).status === 401);
+  check("admin invoices without a session → 401", (await req("/api/admin/invoices")).status === 401);
+  check("admin shipping rules without a session → 401", (await req("/api/admin/shipping-rules")).status === 401);
+  check("outbox job does not exist without CRON_SECRET → 404 (or 401 with a wrong bearer)", [404, 401].includes((await req("/api/internal/outbox/process")).status));
+  check("customer invoice download without a session → 401", (await req("/api/account/orders/VV-000000-NOPE00/invoice")).status === 401);
+
   console.log("\nPages");
   for (const p of ["/", "/shop", "/shop?category=dates", "/product/safawi-dates", "/cart", "/checkout", "/our-story", "/quality", "/contact", "/business", "/admin"]) {
     const r = await req(p);

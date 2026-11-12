@@ -3,6 +3,11 @@ import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { db } from "./db";
 import { reserveForOrder } from "./inventory/order-stock";
+import { enqueueOutbox } from "./notify/outbox";
+import { quoteShipping } from "./shipping/rules";
+import { supplyTypeFor } from "./tax/calc";
+import { snapshotOrderTax } from "./tax/rates";
+import { stateCode } from "./tax/states";
 import { site } from "@/config/site";
 import type { OrderInput } from "./validation";
 import { resolveOrderPaymentMode } from "./orders/payment-mode";
@@ -144,9 +149,22 @@ async function insertOrder(
     };
   });
   const subtotal = items.reduce((s, i) => s + i.lineTotal, 0);
-  const deliveryFee = wholesale?.deliveryFee ?? site.delivery.fee;
+  // Serviceability applies to every order; the fee comes from the shipping rules unless a quote fixed it (M7-T3).
+  const shipping = await quoteShipping(tx, input.pincode, subtotal);
+  if (!shipping.serviceable) throw new OrderError("Sorry, we do not deliver to this pincode yet.", 422);
+  const deliveryFee = wholesale?.deliveryFee ?? shipping.fee;
   const total = subtotal + deliveryFee;
   if (wholesale?.beforeCreate) await wholesale.beforeCreate(tx, { subtotal, total });
+
+  // GST snapshot (M7-T1): frozen now from the rates in force today; lines without a configured rate stay NULL and are filled at invoice time.
+  const sellerCode = stateCode(site.address.state);
+  const supply = sellerCode ? supplyTypeFor(sellerCode, stateCode(input.state)) : null;
+  const tax = supply ? await snapshotOrderTax(tx, { supply, lines: items.map((i, idx) => ({ hsCode: variants.find((v) => v.id === i.variantId)!.hsCode ?? null, amount: i.lineTotal })), deliveryFee, asOf: new Date() }) : null;
+  const itemRows = items.map((i, idx) => {
+    const t = tax?.lines[idx];
+    return { ...i, hsCode: variants.find((v) => v.id === i.variantId)!.hsCode ?? null, ...(t ? { gstRateBp: t.rateBp, taxableValue: t.taxableValue, cgst: t.cgst, sgst: t.sgst, igst: t.igst } : {}) };
+  });
+  const delivery = tax && (deliveryFee === 0 ? { rateBp: 0, taxableValue: 0, cgst: 0, sgst: 0, igst: 0 } : tax.delivery);
 
   const isOnline = input.paymentMethod === "razorpay";
   const number = orderNumber();
@@ -183,12 +201,15 @@ async function insertOrder(
       subtotal,
       deliveryFee,
       total,
-      items: { create: items },
+      supplyType: supply,
+      ...(delivery ? { deliveryGstRateBp: delivery.rateBp, deliveryTaxable: delivery.taxableValue, deliveryCgst: delivery.cgst, deliverySgst: delivery.sgst, deliveryIgst: delivery.igst } : {}),
+      items: { create: itemRows },
       payments: { create: attempt },
     },
     include: { items: true, payments: true },
   });
   if (claim) await tx.idempotencyKey.update({ where: { keyHash: claim.keyHash }, data: { orderId: order.id } });
+  await enqueueOutbox(tx, { template: "order_placed", subjectType: "order", subjectId: order.id, dedupeKey: `order-placed:${order.id}` });
   if (wholesale?.afterCreate) await wholesale.afterCreate(tx, { id: order.id, number: order.number, total: order.total });
 
   // Hold stock for tracked variants. A line that cannot be held aborts (and rolls back) the whole order.

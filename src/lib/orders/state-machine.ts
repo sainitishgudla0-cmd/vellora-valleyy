@@ -1,6 +1,7 @@
 import { Prisma, type OrderActorType, type OrderEvent, type OrderStatus, type PaymentStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { applyOrderInventoryEffects } from "@/lib/inventory/order-stock";
+import { enqueueOutbox } from "@/lib/notify/outbox";
 
 /**
  * The single place that decides order/payment status changes (M2-T2, ADR 0006).
@@ -78,7 +79,7 @@ export interface TransitionInput {
   data?: Pick<Prisma.OrderUpdateManyMutationInput, "razorpayPaymentId" | "razorpayOrderId">;
 }
 
-export type TransitionErrorCode = "reference_required" | "invalid_transition" | "actor_not_allowed" | "reason_required" | "invalid_reason" | "not_found" | "stale_state";
+export type TransitionErrorCode = "invoice_issued" | "reference_required" | "invalid_transition" | "actor_not_allowed" | "reason_required" | "invalid_reason" | "not_found" | "stale_state";
 
 export type TransitionFailure = { ok: false; code: TransitionErrorCode; message: string; current?: { status: OrderStatus; paymentStatus: PaymentStatus } };
 export type TransitionResult = { ok: true; event: OrderEvent } | TransitionFailure;
@@ -136,9 +137,14 @@ export async function transitionOrder(input: TransitionInput, tx?: TransitionTx)
   return tx ? applyTransition(tx, input) : db.$transaction((t) => applyTransition(t, input));
 }
 
+/** The customer notification for an order moving INTO a status (a payment-only change to paid sends `order_paid`). */
+const NOTIFY_ON: Partial<Record<OrderStatus, string>> = { confirmed: "order_confirmed", paid: "order_paid", dispatched: "order_dispatched", delivered: "order_delivered", cancelled: "order_cancelled" };
+
 async function applyTransition(tx: TransitionTx, input: TransitionInput): Promise<TransitionResult> {
   const { orderId, from, to, payment, actor, data } = input;
   const reason = input.reason?.trim() || null;
+  // A tax invoice is a legal document: an invoiced order cannot simply be cancelled (that needs a credit note, which is not built yet).
+  if (to === "cancelled" && from !== to && (await tx.invoice.count({ where: { orderId } })) > 0) return fail("invoice_issued", "A tax invoice has been issued for this order, so it cannot be cancelled here");
   const updated = await tx.order.updateMany({
     where: { id: orderId, status: from, ...(payment ? { paymentStatus: payment.from } : {}) },
     data: { status: to, ...(payment ? { paymentStatus: payment.to } : {}), ...data },
@@ -162,5 +168,8 @@ async function applyTransition(tx: TransitionTx, input: TransitionInput): Promis
   });
   // Stock follows the order in the same transaction (M3, ADR 0011): cancel releases the hold, dispatch consumes it.
   await applyOrderInventoryEffects(tx, { orderId, from, to, actor });
+  // Tell the customer, in the same transaction as the change (the outbox row exists iff the change committed).
+  const template = NOTIFY_ON[to] && from !== to ? NOTIFY_ON[to] : payment?.to === "paid" ? "order_paid" : null;
+  if (template) await enqueueOutbox(tx, { template, subjectType: "order", subjectId: orderId, dedupeKey: `order-event:${event.id}` });
   return { ok: true as const, event };
 }

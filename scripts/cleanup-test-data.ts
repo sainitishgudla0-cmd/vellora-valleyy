@@ -23,7 +23,7 @@ const db = new PrismaClient();
 async function main() {
   const orders = await db.$transaction(async (tx) => {
     const where = { OR: [{ customerName: { startsWith: "SMOKE TEST" } }, { email: { startsWith: "smoke." } }] };
-    const ids = (await tx.order.findMany({ where, select: { id: true } })).map((o) => o.id);
+    const ids = (await tx.order.findMany({ where: { ...where, invoice: null }, select: { id: true } })).map((o) => o.id); // invoiced orders stay (gap-free numbering)
     await releaseHoldsForOrders(tx, ids, { type: "system", id: "test-data-cleanup" }); // units held by test orders go back to stock first (M3)
     return tx.order.deleteMany({ where: { id: { in: ids } } });
   });

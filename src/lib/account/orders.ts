@@ -39,7 +39,12 @@ export async function listOrders(customerId: string, opts: { limit?: number; cur
 export async function getOrder(customerId: string, number: string) {
   const o = await db.order.findFirst({
     where: { number, customerId },
-    include: { items: { orderBy: { id: "asc" } }, events: { orderBy: { createdAt: "asc" }, select: { fromStatus: true, toStatus: true, toPaymentStatus: true, createdAt: true } } },
+    include: {
+      items: { orderBy: { id: "asc" } },
+      events: { orderBy: { createdAt: "asc" }, select: { fromStatus: true, toStatus: true, toPaymentStatus: true, createdAt: true } },
+      shipments: { orderBy: { createdAt: "asc" }, select: { courier: true, awb: true, trackingUrl: true, status: true, events: { orderBy: { createdAt: "asc" }, select: { status: true, createdAt: true } } } },
+      invoice: { select: { number: true, issuedAt: true } },
+    },
   });
   if (!o) return null;
   return {
@@ -56,5 +61,8 @@ export async function getOrder(customerId: string, number: string) {
     notes: o.notes,
     items: o.items.map((i) => ({ productName: i.productName, variantLabel: i.variantLabel, sku: i.sku, unitPrice: i.unitPrice, quantity: i.quantity, lineTotal: i.lineTotal })),
     history: o.events.map((e) => ({ from: e.fromStatus, to: e.toStatus, paymentStatus: e.toPaymentStatus, at: e.createdAt })),
+    // tracking history without the staff's internal notes
+    shipments: o.shipments.map((sh) => ({ courier: sh.courier, awb: sh.awb, trackingUrl: sh.trackingUrl, status: sh.status, events: sh.events.map((e) => ({ status: e.status, at: e.createdAt })) })),
+    invoice: o.invoice ? { number: o.invoice.number, issuedAt: o.invoice.issuedAt } : null,
   };
 }

@@ -17,12 +17,15 @@ export const PERMISSIONS = [
   "wholesale:read", // business accounts, price lists, quotes (commercially sensitive)
   "wholesale:write", // approve accounts, convert enquiries, price quotes
   "pricing:write", // price lists and MOQ / case packs
+  "fulfilment:read", // invoices, shipments, shipping rules, tax rates, notification outbox
+  "fulfilment:write", // issue invoices, create/update shipments, shipping rules, retry notifications
+  "tax:write", // GST rates (set with the accountant's sign-off)
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
 export const ROLE_PERMISSIONS: Readonly<Record<AdminRoleName, readonly Permission[]>> = {
   owner: PERMISSIONS,
-  operations: ["admin:read", "orders:write", "enquiries:write", "variants:write", "inventory:write", "wholesale:read", "wholesale:write"],
+  operations: ["admin:read", "orders:write", "enquiries:write", "variants:write", "inventory:write", "wholesale:read", "wholesale:write", "fulfilment:read", "fulfilment:write"],
   catalog: ["admin:read", "variants:write", "catalog:write", "inventory:write", "wholesale:read", "pricing:write"],
   viewer: ["admin:read"],
 };

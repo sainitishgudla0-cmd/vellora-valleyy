@@ -6,8 +6,8 @@ import { hashPassword, MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, passwordProblem
 describe("role × permission matrix", () => {
   // Written out in full on purpose: a change to access rules must change this table.
   const EXPECTED: Record<AdminRoleName, Permission[]> = {
-    owner: ["admin:read", "orders:write", "enquiries:write", "variants:write", "catalog:write", "inventory:write", "testdata:write", "users:manage", "wholesale:read", "wholesale:write", "pricing:write"],
-    operations: ["admin:read", "orders:write", "enquiries:write", "variants:write", "inventory:write", "wholesale:read", "wholesale:write"],
+    owner: ["admin:read", "orders:write", "enquiries:write", "variants:write", "catalog:write", "inventory:write", "testdata:write", "users:manage", "wholesale:read", "wholesale:write", "pricing:write", "fulfilment:read", "fulfilment:write", "tax:write"],
+    operations: ["admin:read", "orders:write", "enquiries:write", "variants:write", "inventory:write", "wholesale:read", "wholesale:write", "fulfilment:read", "fulfilment:write"],
     catalog: ["admin:read", "variants:write", "catalog:write", "inventory:write", "wholesale:read", "pricing:write"],
     viewer: ["admin:read"],
   };

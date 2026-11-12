@@ -16,3 +16,5 @@ paths:
 - Never log full payment payloads, signatures, key secrets or card/UPI data. Log the order number and reason only.
 - Live keys (`rzp_live_`) are never used outside production; tests use fake `rzp_test_` values and locally computed HMACs.
 - Any change here needs regression tests in `tests/unit/payment-*.test.ts` and, for state transitions, `tests/integration/`.
+
+- Amounts and prices are GST-inclusive integer paise; tax is carved out per line (`src/lib/tax/calc.ts`), never with floating point. GST rates are data (`TaxRate`), never hard-coded; a missing rate or seller GSTIN refuses the invoice rather than guessing.

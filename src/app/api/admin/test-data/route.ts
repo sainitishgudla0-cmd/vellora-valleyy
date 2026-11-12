@@ -11,7 +11,8 @@ export async function DELETE(req: Request) {
   if ("response" in auth) return auth.response;
   const [orders, enquiries, subscribers] = await db.$transaction(async (tx) => {
     // units held by test orders go back to stock before the orders disappear (M3)
-    const ids = (await tx.order.findMany({ where: TEST_ORDER_WHERE, select: { id: true } })).map((o) => o.id);
+    // an order with a tax invoice is never removed (invoice numbers must stay gap-free)
+    const ids = (await tx.order.findMany({ where: { ...TEST_ORDER_WHERE, invoice: null }, select: { id: true } })).map((o) => o.id);
     await releaseHoldsForOrders(tx, ids, { type: "admin", id: auth.admin.actorId });
     return Promise.all([tx.order.deleteMany({ where: { id: { in: ids } } }), tx.enquiry.deleteMany({ where: TEST_ENQUIRY_WHERE }), tx.subscriber.deleteMany({ where: TEST_SUBSCRIBER_WHERE })]);
   });
