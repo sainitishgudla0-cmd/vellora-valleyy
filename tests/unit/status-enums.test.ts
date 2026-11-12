@@ -11,9 +11,9 @@ import { ORDER_STATUS_LABEL } from "@/lib/orders";
 import { PAYABLE_PAYMENT_STATUSES } from "@/lib/payment-verification";
 import { orderSchema } from "@/lib/validation";
 
-const dbMock = vi.hoisted(() => ({ order: { update: vi.fn(), create: vi.fn() } }));
+const svc = vi.hoisted(() => ({ updateOrderAsAdmin: vi.fn() }));
 const authMock = vi.hoisted(() => ({ isAdmin: vi.fn() }));
-vi.mock("@/lib/db", () => ({ db: dbMock }));
+vi.mock("@/lib/orders/admin-update", () => svc);
 vi.mock("@/lib/admin-auth", () => authMock);
 
 import { PATCH } from "@/app/api/admin/orders/[id]/route";
@@ -51,37 +51,45 @@ describe("PATCH /api/admin/orders/[id] enum boundary", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     authMock.isAdmin.mockResolvedValue(true);
-    dbMock.order.update.mockResolvedValue({ id: "o1" });
+    svc.updateOrderAsAdmin.mockResolvedValue({ ok: true, changed: true });
   });
 
   it.each(LEGACY_STATUS)("accepts status %s", async (status) => {
-    const res = await call({ status });
-    expect(res.status).toBe(200);
-    expect(dbMock.order.update).toHaveBeenCalledWith({ where: { id: "o1" }, data: { status } });
+    expect((await call({ status })).status).toBe(200);
+    expect(svc.updateOrderAsAdmin).toHaveBeenCalledWith({ orderId: "o1", status });
   });
 
   it.each(LEGACY_PAYMENT_STATUS)("accepts paymentStatus %s", async (paymentStatus) => {
-    expect((await call({ paymentStatus })).status).toBe(200);
-    expect(dbMock.order.update).toHaveBeenCalledWith({ where: { id: "o1" }, data: { paymentStatus } });
+    expect((await call({ paymentStatus, reason: "r" })).status).toBe(200);
+    expect(svc.updateOrderAsAdmin).toHaveBeenCalledWith({ orderId: "o1", paymentStatus, reason: "r" });
   });
 
-  it.each([{ status: "shipped" }, { status: "PAID" }, { status: " paid" }, { status: "" }, { status: null }, { paymentStatus: "settled" }, { paymentStatus: "Unpaid" }])(
-    "rejects unsupported value %j with 422 and never touches the database",
+  it.each([{ status: "shipped" }, { status: "PAID" }, { status: " paid" }, { status: "" }, { status: null }, { paymentStatus: "settled" }, { paymentStatus: "Unpaid" }, { reason: "x".repeat(501) }, { paymentReference: "x".repeat(81) }])(
+    "rejects unsupported value %j with 422 and never reaches the service",
     async (body) => {
       expect((await call(body)).status).toBe(422);
-      expect(dbMock.order.update).not.toHaveBeenCalled();
+      expect(svc.updateOrderAsAdmin).not.toHaveBeenCalled();
     },
   );
 
   it("requires an admin session", async () => {
     authMock.isAdmin.mockResolvedValue(false);
     expect((await call({ status: "paid" })).status).toBe(401);
-    expect(dbMock.order.update).not.toHaveBeenCalled();
+    expect(svc.updateOrderAsAdmin).not.toHaveBeenCalled();
   });
 
-  it("returns 404 when the order does not exist", async () => {
-    dbMock.order.update.mockRejectedValue(new Error("P2025"));
-    expect((await call({ status: "paid" })).status).toBe(404);
+  it.each([
+    [{ ok: false, code: "not_found", message: "m" }, 404],
+    [{ ok: false, code: "reason_required", message: "m" }, 422],
+    [{ ok: false, code: "reference_required", message: "m" }, 422],
+    [{ ok: false, code: "invalid_transition", message: "m" }, 409],
+    [{ ok: false, code: "actor_not_allowed", message: "m" }, 409],
+    [{ ok: false, code: "stale_state", message: "m" }, 409],
+    [{ ok: false, code: "payment_edit_not_allowed", message: "m" }, 409],
+    [{ ok: false, code: "reference_in_use", message: "m" }, 409],
+  ])("maps service result %j to HTTP %i", async (result, status) => {
+    svc.updateOrderAsAdmin.mockResolvedValue(result);
+    expect((await call({ status: "confirmed" })).status).toBe(status);
   });
 });
 

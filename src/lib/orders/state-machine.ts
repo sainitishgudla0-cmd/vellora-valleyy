@@ -32,10 +32,18 @@ export const PAYMENT_TRANSITIONS: Readonly<Record<PaymentStatus, readonly Paymen
   refunded: [],
 };
 
-/** Actors allowed to move a payment into each status. Unlisted targets allow every actor. */
+/**
+ * Actors allowed to move a payment into each status. Unlisted targets allow every actor.
+ * An admin may mark a payment paid only as an audited manual confirmation: payment-only change, explicit
+ * reason and an external payment reference (see validateTransition). Which orders may be confirmed manually
+ * (request-only ones) is decided by the admin service, which also keeps the Payment row in step.
+ */
 const PAYMENT_TARGET_ACTORS: Partial<Record<PaymentStatus, readonly OrderActorType[]>> = {
-  paid: ["gateway", "system"],
+  paid: ["gateway", "system", "admin"],
 };
+
+/** Staff-entered external payment reference: 3-80 chars, starts alphanumeric. */
+export const PAYMENT_REFERENCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 _./:-]{2,79}$/;
 
 /** Actors allowed to move an order into each status. Unlisted targets allow every actor. */
 const ORDER_TARGET_ACTORS: Partial<Record<OrderStatus, readonly OrderActorType[]>> = {
@@ -63,11 +71,13 @@ export interface TransitionInput {
   actor: TransitionActor;
   /** Required for admin actors, cancellations and refunds. */
   reason?: string;
+  /** Required (and only stored) when an admin manually confirms a payment: the external payment reference. */
+  paymentReference?: string;
   /** Extra order columns written in the same conditional update (e.g. the gateway payment id). */
   data?: Pick<Prisma.OrderUpdateManyMutationInput, "razorpayPaymentId" | "razorpayOrderId">;
 }
 
-export type TransitionErrorCode = "invalid_transition" | "actor_not_allowed" | "reason_required" | "invalid_reason" | "not_found" | "stale_state";
+export type TransitionErrorCode = "reference_required" | "invalid_transition" | "actor_not_allowed" | "reason_required" | "invalid_reason" | "not_found" | "stale_state";
 
 export type TransitionFailure = { ok: false; code: TransitionErrorCode; message: string; current?: { status: OrderStatus; paymentStatus: PaymentStatus } };
 export type TransitionResult = { ok: true; event: OrderEvent } | TransitionFailure;
@@ -94,6 +104,10 @@ export function validateTransition(input: Omit<TransitionInput, "orderId" | "dat
   }
   if (payment && PAYMENT_TARGET_ACTORS[payment.to] && !PAYMENT_TARGET_ACTORS[payment.to]!.includes(actor.type)) {
     return fail("actor_not_allowed", `${actor.type} may not move a payment to ${payment.to}`);
+  }
+  if (actor.type === "admin" && payment?.to === "paid") {
+    if (statusChange) return fail("invalid_transition", "Confirm a payment on its own, not together with a status change");
+    if (!PAYMENT_REFERENCE_PATTERN.test(input.paymentReference?.trim() ?? "")) return fail("reference_required", "A payment reference (3-80 characters) is required to confirm a payment manually");
   }
   const trimmed = reason?.trim();
   if (trimmed && trimmed.length > MAX_REASON_LENGTH) return fail("invalid_reason", `Reason is longer than ${MAX_REASON_LENGTH} characters`);
@@ -142,6 +156,7 @@ async function applyTransition(tx: TransitionTx, input: TransitionInput): Promis
       actorType: actor.type,
       actorId: actor.id ?? null,
       reason,
+      paymentReference: actor.type === "admin" && payment?.to === "paid" ? input.paymentReference?.trim() || null : null,
     },
   });
   return { ok: true as const, event };

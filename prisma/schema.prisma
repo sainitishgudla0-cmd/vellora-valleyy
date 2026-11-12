@@ -140,6 +140,8 @@ model Payment {
   /// Short machine code for why (never gateway payloads or customer data).
   reconcileReason     String?
   lastCheckedAt       DateTime?
+  /// Staff-entered external payment reference (UPI/bank/cash-receipt id) when a request-only payment was confirmed manually (M2-T6). Unique: one external payment cannot confirm two orders.
+  manualReference     String?         @unique
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
 
@@ -169,6 +171,8 @@ model OrderEvent {
   actorType         OrderActorType
   actorId           String?
   reason            String?
+  /// Manual payment confirmation reference (same value as Payment.manualReference).
+  paymentReference  String?
   createdAt         DateTime       @default(now())
 
   @@index([orderId, createdAt])

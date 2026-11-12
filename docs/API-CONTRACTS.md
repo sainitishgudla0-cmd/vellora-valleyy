@@ -54,7 +54,7 @@ Write-capable test handshake. **`404` whenever `APP_ENV` resolves to production 
 |---|---|---|
 | `POST /api/admin/login` | `{ password }` | `200 { ok }` + cookie · `401` · `429` (8 per 15 min) · `503` not configured |
 | `POST /api/admin/logout` | — | `200 { ok }` (clears cookie; stateless, no server revocation) |
-| `PATCH /api/admin/orders/[id]` | `{ status?, paymentStatus? }` (enums) | `200 { ok }` · `404` · `422` for any value outside the enums (unchanged). **Any transition is allowed (M2-T2/T6 add a state machine).** |
+| `PATCH /api/admin/orders/[id]` | `{ status?, paymentStatus?, reason? (≤500), paymentReference? (3-80) }` (enums; unknown values `422`) | `200 { ok }` (also for an unchanged/empty request) · `401` · `404` · `422 { fields }` reason or reference missing/malformed · `409 { error, code }` invalid transition, admin not allowed (e.g. marking an order paid), stale, payment edit not allowed, no payment record, reference already used. **Every change goes through the order state machine (M2-T6, ADR 0010)**: one transaction, an `OrderEvent` (actor `admin`, reason, payment reference) per change. See below. |
 | `PATCH /api/admin/variants/[id]` | `{ price?: rupees (>0, ≤100000), inStock?: boolean }` | `200 { ok, price (paise), inStock }` · `404` |
 | `PATCH /api/admin/enquiries/[id]` | `{ status: new|in_progress|closed }` | `200 { ok }` · `404` |
 | `DELETE /api/admin/test-data` | — | `200 { ok, orders, enquiries, subscribers }`: deletes `SMOKE TEST` / `smoke.` records |
@@ -85,3 +85,10 @@ Internal modules only; no HTTP contract changes. `Payment` rows are not written 
 
 ## Reconciliation (M2-T5, ADR 0009)
 `npm run payments:reconcile` (operator, guarded like `db:*`; production needs the explicit confirmation) processes attempts flagged `needsReconciliation` for the current Razorpay mode: completes captured payments through the same code as `/verify`, attaches a gateway order found by receipt after a lost create response, cancels never-created orders only after 30 minutes and a successful empty lookup, and clears flags when nothing is settling. Prints counts only.
+
+## Admin order and payment changes (M2-T6, ADR 0010)
+- **Status:** only graph transitions (`pending_confirmation → confirmed|cancelled`, `confirmed|paid → dispatched|cancelled`, `dispatched → delivered|cancelled`, `awaiting_payment → cancelled`). Admins can never set `paid`, `awaiting_payment` or leave `delivered`/`cancelled`. A plain status change records the reason "Status changed from the admin dashboard" unless `reason` is given; cancelling an order whose payment is `paid` requires an explicit `reason` (`422`).
+- **Manual payment confirmation** (`{ paymentStatus: "paid", reason, paymentReference }`): only for request-only (pay-on-delivery) orders with a request-only payment record, payment-only (no simultaneous status change), `unpaid → paid`. Stores the reference on the `Payment` (`manualReference`, unique: one external payment cannot confirm two orders) and on the event. Never for Razorpay, mock or legacy (mode NULL) orders, and never on cancelled orders.
+- **Refund bookkeeping** (`{ paymentStatus: "refunded", reason }`): `paid → refunded` records that a refund was made outside the system (real refunds are M10). `refunded` is terminal.
+- All other payment edits are refused (`409 payment_edit_not_allowed`). Orders with no payment record, and legacy orders, need operator reconciliation.
+- The admin dashboard dropdown (status only) is unchanged; a rejected move shows the existing "Error" and reverts. There is no admin UI yet for entering a payment reference (needs a UI approval); the endpoint is API-only.

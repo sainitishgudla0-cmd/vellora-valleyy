@@ -78,16 +78,33 @@ describe("full payment transition matrix", () => {
 describe("actor and reason rules", () => {
   const ok = (over: object) => validateTransition({ from: "awaiting_payment", to: "paid", payment: { from: "unpaid", to: "paid" }, actor: GATEWAY, ...over });
 
-  it("only gateway/system may mark an order paid or a payment paid (no manual or automatic offline confirmation)", () => {
+  it("only gateway/system may mark an order paid; customers never mark a payment paid", () => {
     expect(ok({})).toBeNull();
     expect(ok({ actor: SYSTEM })).toBeNull();
     for (const type of ["admin", "customer"] as OrderActorType[]) {
-      expect(ok({ actor: { type }, reason: "x" })?.code).toBe("actor_not_allowed");
+      expect(ok({ actor: { type }, reason: "x", paymentReference: "UPI-123456" })?.code).toBe("actor_not_allowed");
     }
     const pay = (type: OrderActorType) => validateTransition({ from: "confirmed", to: "confirmed", payment: { from: "unpaid", to: "paid" }, actor: { type }, reason: "x" });
-    expect(pay("admin")?.code).toBe("actor_not_allowed");
     expect(pay("customer")?.code).toBe("actor_not_allowed");
     expect(pay("gateway")).toBeNull();
+  });
+
+  describe("audited manual payment confirmation (admin)", () => {
+    const manual = (over: object = {}) =>
+      validateTransition({ from: "confirmed", to: "confirmed", payment: { from: "unpaid", to: "paid" }, actor: ADMIN, reason: "Cash received at counter", paymentReference: "RCPT-2026-0001", ...over });
+    it("needs a payment-only change, a reason and a well-formed reference", () => {
+      expect(manual()).toBeNull();
+      expect(manual({ reason: undefined })?.code).toBe("reason_required");
+      expect(manual({ reason: "  " })?.code).toBe("reason_required");
+      expect(manual({ paymentReference: undefined })?.code).toBe("reference_required");
+      for (const bad of ["", "ab", "  ", "-starts-with-dash", "has<script>", "x".repeat(81)]) expect(manual({ paymentReference: bad })?.code).toBe("reference_required");
+      for (const good of ["abc", "UPI/2026/11/ABC", "txn_123.456:7", "x".repeat(80)]) expect(manual({ paymentReference: good })).toBeNull();
+      expect(manual({ to: "delivered", from: "dispatched" })?.code).toBe("invalid_transition"); // not together with a status change
+    });
+    it("is limited to the payment graph (paid -> unpaid and refunded -> paid stay impossible)", () => {
+      expect(manual({ payment: { from: "paid", to: "unpaid" } })?.code).toBe("invalid_transition");
+      expect(manual({ payment: { from: "refunded", to: "paid" } })?.code).toBe("invalid_transition");
+    });
   });
 
   it("customers cannot confirm, dispatch or deliver", () => {
@@ -136,7 +153,7 @@ describe("transitionOrder", () => {
       data: { status: "paid", paymentStatus: "paid", razorpayPaymentId: "pay_1" },
     });
     expect(tx.orderEvent.create).toHaveBeenCalledWith({
-      data: { orderId: "o1", fromStatus: "awaiting_payment", toStatus: "paid", fromPaymentStatus: "unpaid", toPaymentStatus: "paid", actorType: "gateway", actorId: null, reason: null },
+      data: { orderId: "o1", fromStatus: "awaiting_payment", toStatus: "paid", fromPaymentStatus: "unpaid", toPaymentStatus: "paid", actorType: "gateway", actorId: null, reason: null, paymentReference: null },
     });
     // nothing is written outside the transaction
     expect(dbMock.order.updateMany).not.toHaveBeenCalled();
@@ -156,6 +173,14 @@ describe("transitionOrder", () => {
     expect(dbMock.$transaction).not.toHaveBeenCalled();
     expect(tx.order.updateMany).toHaveBeenCalledTimes(1);
     expect(tx.orderEvent.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("stores the payment reference on the event only for an admin payment confirmation", async () => {
+    await transitionOrder({ orderId: "o1", from: "confirmed", to: "confirmed", payment: { from: "unpaid", to: "paid" }, actor: ADMIN, reason: "Cash received", paymentReference: "  RCPT-1  " });
+    expect(tx.orderEvent.create.mock.calls[0][0].data).toMatchObject({ actorType: "admin", paymentReference: "RCPT-1", toPaymentStatus: "paid" });
+    tx.orderEvent.create.mockClear();
+    await transitionOrder({ orderId: "o1", from: "awaiting_payment", to: "paid", payment: { from: "unpaid", to: "paid" }, actor: GATEWAY, paymentReference: "ignored" });
+    expect(tx.orderEvent.create.mock.calls[0][0].data.paymentReference).toBeNull();
   });
 
   it("invalid requests never open a transaction", async () => {

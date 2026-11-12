@@ -4,16 +4,14 @@
  * its argument touches `status` or `paymentStatus`:
  *  - status writers: only `src/lib/orders/state-machine.ts` (the implementation) plus the legacy list below;
  *  - non-status writers (e.g. attaching a gateway reference): pinned per file with exact counts.
- * M2-T5 moved checkout and Razorpay verification onto `transitionOrder`; the admin PATCH is the only legacy
- * status writer left and is removed in M2-T6 (then LEGACY_STATUS_WRITERS must become empty).
+ * M2-T5 moved checkout and Razorpay verification, and M2-T6 the admin PATCH, onto `transitionOrder`: the legacy
+ * status-writer list is empty and must stay empty.
  */
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const LEGACY_STATUS_WRITERS: Record<string, number> = {
-  "src/app/api/admin/orders/[id]/route.ts": 1, // → M2-T6
-};
+const LEGACY_STATUS_WRITERS: Record<string, number> = {}; // M2-T6 moved the admin PATCH onto the state machine: nothing is left
 const NON_STATUS_WRITERS: Record<string, number> = {
   "src/lib/payments/checkout.ts": 1, // attaches Order.razorpayOrderId after the gateway call
   "src/lib/payments/reconcile.ts": 1, // same, for a lost create response

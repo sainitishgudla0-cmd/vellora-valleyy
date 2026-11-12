@@ -3,14 +3,14 @@
 _Read this first in a new session. Keep it under ~80 lines. Scope and AC per task: `BACKEND-ROADMAP.md`._
 
 ## Current
-- **Milestone:** M2 in progress on `backend/m2-payments`. M2-T1..T5 done. T6 needs approval.
+- **Milestone:** M2 in progress on `backend/m2-payments`. **M2 complete (T1..T6)**, awaiting user review. M3 needs approval.
 - **Branch:** M1 is integrated: `backend/development` = see the M2-T5 entry below (fast-forwarded from `backend/m2-payments`; no PR workflow). Working copy moved to `~/Developer/Velora-Valley` (the Desktop copy is iCloud-synced and spawns duplicate files). `main` = `55aa848`, untouched.
 - **Last verified:** 2026-11-11, `npm run verify:full` on throwaway Postgres 16 (127.0.0.1): all gates green. See the M1 evidence below.
 
 ## Next up
 | Task | Status | Notes |
 |---|---|---|
-| M2-T6 admin PATCH + staff payment confirmation | proposed (needs approval) | admin PATCH via `transitionOrder` (409 on invalid), payment-reference capture + audited manual confirmation (opens `paid` to an admin actor), empties the ratchet's legacy list |
+| M3 inventory/stock reservation + order idempotency | proposed (needs approval) | M2 is complete; see `BACKEND-ROADMAP.md` M3 |
 
 ## Blockers / open items
 1. **Preview DB isolation unverified.** Vercel project settings weren't accessible (local CLI account can't see the production team; Vercel MCP unauthorised). GitHub shows no Vercel deployments or statuses for this repo, so previews don't appear to be Git-triggered. M1 builds are DB-write-free regardless; reads during a preview build would still use whatever `DATABASE_URL` preview has. Owner: user (Vercel dashboard).
@@ -21,6 +21,12 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 6. Local Node is 20.19.6; project targets 24 (`.nvmrc`, CI uses 24).
 
 ## Done
+### M2-T6 — admin order/payment changes through the state machine (ADR 0010)
+- `PATCH /api/admin/orders/[id]` → `updateOrderAsAdmin` → `transitionOrder` (actor admin): invalid transitions 409, reason/reference 422, admin can never set an order `paid`. Manual payment confirmation only for request-only orders (payment-only, reason + external reference stored on `Payment.manualReference` (unique) and the event); `paid → refunded` bookkeeping with reason; gateway/mock/legacy payments not editable. Payment row + order + event in one transaction. State machine: admin may confirm a payment only with a valid reference, payment-only. Additive migration `manual_payment_confirmation`. Direct-writer ratchet legacy list is now empty. No frontend change (dropdown unchanged; no UI yet for entering a reference — needs approval).
+- Tests: `integration/admin-orders.test.ts` (25: transitions, invalid 409, no-paid-by-admin, default/explicit reasons, manual confirm incl. reference reuse rollback, refused for razorpay/mock/legacy/no-record/cancelled, refund bookkeeping, race, trigger-injected rollback, DB CHECK), state-machine unit additions, PATCH boundary unit tests rewritten.
+- **Evidence (2026-11-12, Node 24.22.3, throwaway Postgres 16.13, fresh DB):** `verify:full` + `VERIFY_UI=1` → typecheck ✓ · unit 231/231 ✓ · env ✓ · migrate deploy ✓ · schema diff none ✓ · integration 147/147 ✓ · build ✓ · smoke 41/0 ✓ · UI 51/0 ✓; `npm audit --omit=dev` 0.
+- M2 acceptance (roadmap): no application code writes `Order.status`/`paymentStatus` outside the state machine (ratchet test, empty legacy list); mock impossible in preview/production (tests, ADR 0002/0008); 41 smoke + 51 UI pass; contracts updated.
+- Open for later: admin UI for payment references; per-person admin identity (M4); order idempotency + stock (M3); webhooks/refunds (M10).
 ### M2-T5 — order/payment integration (ADR 0009)
 - `createOrder` inserts order + `Payment` attempt atomically (COD → `request_only`; mock → mock attempt; Razorpay → pending attempt). `/api/orders` uses `startOnlinePayment`: gateway call outside any transaction; definite failure → cancel via `transitionOrder`; unknown outcome → keep `awaiting_payment`, flag `needsReconciliation`, 502 + order number. Razorpay payload unchanged; mock payload simulated and secret-free.
 - `/api/payments/razorpay/verify` → `verifyRazorpayCheckout`: server records + `paymentMode` match + attempt, HMAC, then server-side `GET /payments/{id}` must be `captured` with same gateway order/amount/INR; 202 pending, 503 unreachable, 409 conflicts, idempotent success; paid transition = attempt claim + `transitionOrder` in one transaction. Legacy `paymentMode` NULL → 409 (manual). State machine gained combined-state invariants.
