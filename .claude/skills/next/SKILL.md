@@ -34,7 +34,12 @@ Do exactly one coherent task. Stop early and report if any step is blocked; neve
 ## 7. Record
 - Update `docs/PROGRESS.md`: move the task to Done with evidence (commands run plus summary lines, commit SHA), set the next task, and list blockers. Keep the file under ~80 lines; move older history to `docs/BACKEND-ROADMAP.md` completion evidence.
 - Update `docs/API-CONTRACTS.md` / ADRs if contracts or decisions changed.
-- Commit on the milestone branch with a descriptive message. Don't push, merge or deploy unless the user asked in this session.
+- Commit on the milestone branch with a descriptive message, push the branch, and wait for CI to be green on it (check with `gh run list --branch <branch>`).
 
-## 8. Hand off (≤12 lines)
+## 8. Integrate (direct, verified, no PR)
+- Only when every gate passed, CI is green and the tree is clean: `git fetch origin`, `git switch backend/development`, `git merge --ff-only origin/<milestone-branch>`, `git push origin backend/development`. No force push, no merge commit, no `gh pr create`, never touch `main`.
+- If the fast-forward fails or CI is red, stop and report; don't work around it. Confirm `origin/backend/development` equals the task commit and note the CI run in PROGRESS.
+- Never deploy. Never open a PR unless the user explicitly asks for one.
+
+## 9. Hand off (≤12 lines)
 What changed (files) · checks run with results · what's unverified · next task · anything needing a user decision.

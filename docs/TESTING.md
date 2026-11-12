@@ -8,7 +8,7 @@
 | Browser UI | `scripts/e2e-ui.mjs` (51 checks) | same + Chrome (`CHROME_PATH`) | `npm run test:ui -- <base-url>` |
 | Fast gate | — | — | `npm run verify` (typecheck + unit + env gate) |
 | Milestone gate | `scripts/verify-full.ts` | disposable Postgres | `npm run verify:full` (`VERIFY_UI=1` adds the browser test) |
-| CI | `.github/workflows/ci.yml` | Postgres 16 service container | on push to `main`, `backend/**`, and PRs |
+| CI | `.github/workflows/ci.yml` | Postgres 16 service container | on push to `main` and `backend/**` (and on PRs, if the user opens one) |
 
 ## Safety model (ADR 0003)
 Write-capable tests and DB scripts refuse to run unless **all** of these hold:

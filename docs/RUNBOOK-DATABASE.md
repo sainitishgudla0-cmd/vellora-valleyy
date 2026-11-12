@@ -33,7 +33,7 @@ Operator-only procedures. Agents must not run anything in the "production" secti
 ## Future production migrations
 - Additive migrations only. Destructive steps (drop, rename, type narrowing) need an ADR and an expand → migrate → contract plan across releases.
 - Order: back up (Neon branch) → `db:migrate:deploy:production` → deploy the app version that needs it → `db:schema:diff` = no drift.
-- Each migration PR states its rollback (down SQL or restore point) in the description.
+- Each migration's commit message and PROGRESS entry state its rollback (down SQL or restore point) in the description.
 
 ## Production catalogue sync (replaces the old deploy-time seed)
 After reviewing `src/data/products.ts` changes:

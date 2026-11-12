@@ -2,7 +2,7 @@
 
 Milestones run in order unless dependencies allow overlap. Each task is one `/next` run. Task status lives in `docs/PROGRESS.md`; this file holds scope, acceptance criteria (AC) and the evidence required. A milestone closes only when every AC has evidence and `npm run verify:full` plus CI are green.
 
-Branching: `backend/mN-<slug>` from `backend/development` → PR → `backend/development`. `main` is promoted only by the user.
+Branching: `backend/mN-<slug>` from `backend/development` → verified fast-forward push into `backend/development` (no PRs unless the user asks; see CLAUDE.md Workflow). `main` is promoted only by the user.
 
 ---
 

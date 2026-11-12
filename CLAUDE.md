@@ -8,6 +8,11 @@ India-focused D2C + wholesale e-commerce for Anantha Food Products. Next.js 16 A
 - Canonical docs (don't duplicate them): `docs/ARCHITECTURE.md` · `docs/API-CONTRACTS.md` · `docs/BACKEND-ROADMAP.md` · `docs/TESTING.md` · `docs/RUNBOOK-DATABASE.md` · `docs/DECISIONS/`.
 - Area rules load from `.claude/rules/` when you touch matching files.
 
+## Workflow (direct integration, no PRs)
+1. Work and commit on `backend/<milestone>` (from `backend/development`). Push the branch freely; CI runs on `backend/**`.
+2. When the task's gates pass (`npm run verify`; `verify:full` at milestone gates), CI is green on the pushed branch, and the tree is clean: `git fetch`, `git switch backend/development`, `git merge --ff-only origin/backend/<milestone>`, `git push origin backend/development`. If a fast-forward is impossible, rebase the milestone branch onto `backend/development` locally, re-verify, then retry; never force-push or create merge commits.
+3. Confirm the remote SHA and the CI run on `backend/development`. `main` is promoted only by the user.
+
 ## Commands
 | Purpose | Command |
 |---|---|
@@ -18,7 +23,7 @@ India-focused D2C + wholesale e-commerce for Anantha Food Products. Next.js 16 A
 | Dev server | `npm run dev` |
 
 ## Hard safety rules
-1. Never commit to or merge into `main`. Work on `backend/<milestone>` branches; PR into `backend/development`.
+1. Never commit to or merge into `main`. Work on `backend/<milestone>` branches and integrate by direct fast-forward into `backend/development` (see Workflow). **Never open a pull request** (no `gh pr create`, no create-pr command) unless the user explicitly asks for one in that message.
 2. Never point any command at the production database or site. DB-changing scripts are guarded (`scripts/db-guard.ts`); never bypass, weaken or "temporarily" disable a guard.
 3. Never run `prisma db push`, `prisma migrate reset`, or ad-hoc SQL against shared databases. Schema changes go through `prisma/migrations` only.
 4. Never deploy (`vercel deploy`, `vercel --prod`) or change Vercel/GitHub settings unless the user explicitly asks in this session.

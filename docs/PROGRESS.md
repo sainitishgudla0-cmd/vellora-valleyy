@@ -4,7 +4,7 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 
 ## Current
 - **Milestone:** M1 complete, awaiting user review. M2 not started (needs approval).
-- **Branch:** `backend/m1-foundation` (from `backend/development` @ `55aa848`). Never `main`.
+- **Branch:** M1 is integrated: `backend/development` = `aaeb082` (fast-forward from `backend/m1-foundation`; PR #1 auto-marked merged by GitHub, no PR workflow going forward). `main` = `55aa848`, untouched. Next milestone branch: `backend/m2-*` from `backend/development`.
 - **Last verified:** 2026-11-11, `npm run verify:full` on throwaway Postgres 16 (127.0.0.1): all gates green. See the M1 evidence below.
 
 ## Next up
@@ -16,7 +16,7 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 ## Blockers / open items
 1. **Preview DB isolation unverified.** Vercel project settings weren't accessible (local CLI account can't see the production team; Vercel MCP unauthorised). GitHub shows no Vercel deployments or statuses for this repo, so previews don't appear to be Git-triggered. M1 builds are DB-write-free regardless; reads during a preview build would still use whatever `DATABASE_URL` preview has. Owner: user (Vercel dashboard).
 2. **Production not baselined** onto Prisma Migrate (`docs/RUNBOOK-DATABASE.md`). Operator task, planned in M9-T1 or before the first production migration.
-3. **CI not yet run on GitHub**; it runs on the first push of a branch with `.github/workflows/ci.yml` (pushing workflow files needs the `workflow` token scope).
+3. CI is green on `backend/m1-foundation` (2 runs, `aaeb082`); the run on `backend/development` was still in progress at last check.
 4. Dev-dependency advisories: `postcss` (high), `esbuild` via `tsx` (moderate). Prod deps clean. Tracked as M9-T9.
 5. Local Node is 20.19.6; project targets 24 (`.nvmrc`, CI uses 24).
 
