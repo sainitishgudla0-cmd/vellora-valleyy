@@ -3,7 +3,7 @@
 _Read this first in a new session. Keep it under ~80 lines. Scope and AC per task: `BACKEND-ROADMAP.md`._
 
 ## Current
-- **Milestone:** M1-M4 integrated. **M5 (customer accounts, addresses, order history, consent, export/erasure) implemented on `backend/m5-customers`**, awaiting gate/CI then fast-forward. M6 needs approval.
+- **Milestone:** M1-M4 integrated. **M5 (customer accounts, addresses, order history, consent, export/erasure) complete and integrated**. M6 needs approval.
 - **Branch:** M1 is integrated: `backend/development` fast-forwarded from `backend/m2-payments` after each task (no PR workflow); see the M2-T6 entry for the latest SHA and CI run. `main` = `55aa848`, untouched. Working copy moved to `~/Developer/Velora-Valley` (the Desktop copy is iCloud-synced and spawns duplicate files). `main` = `55aa848`, untouched.
 - **Last verified:** 2026-11-11, `npm run verify:full` on throwaway Postgres 16 (127.0.0.1): all gates green. See the M1 evidence below.
 
@@ -12,7 +12,7 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 |---|---|---|
 | M3 inventory + order idempotency | done on `backend/m3-inventory` (see entry) | ADR 0011 |
 | M4 admin accounts, roles, audit | done (T1-T6) | ADR 0012 |
-| M5 customer accounts | done on `backend/m5-customers` (API only; no UI until M8) | ADR 0013 |
+| M5 customer accounts | done (API only; no UI until M8) | ADR 0013 |
 | M6 | proposed (needs approval) | see `BACKEND-ROADMAP.md` |
 
 ## Blockers / open items
@@ -28,6 +28,7 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 - T1 `Customer`, `CustomerSession`, `Address`, `OtpChallenge`, `ConsentRecord`, nullable `Order.customerId` (migration `20261115090000_customer_accounts`, additive; partial unique index = one default address; CHECK on attempts). T2 sign-in by **emailed one-time code** (no password): 6 digits, 10 min, one live code per address, 5 guesses per code, 5 codes/hour, 30 s resend, per-IP limits; address and code stored as keyed hashes; no enumeration; first sign-in needs `acceptTerms` (creates the account + consent records). **Delivery is a mock until M7**: `CUSTOMER_OTP_MODE=mock` is refused in preview/production (`env:check`), so sign-in answers 503 there. T3 `/api/account/*`: me, consent, addresses CRUD (max 10, one default), orders list/detail (own only; 404 for others), logout, claim, export, delete; every handler but sign-in/logout calls `requireCustomer` (ratchet). T4 `POST /api/orders` links the order from the cookie only; guest checkout unchanged. T5 claim by verified email or by order number + token. T6 consent history, JSON export, erasure (needs a sign-in from the last 10 min; refused while orders are open; orders/enquiries anonymised, account data deleted).
 - Tests: `integration/{customer-otp,customer-account}` (63: brute-force caps sequential and parallel, enumeration safety, hashed storage, sessions, authz matrix, IDOR on addresses/orders/claims, linking, export, erasure), `unit/account-core`; smoke +5 checks. Mutation checks: dropping the owner filter, the attempt cap, the open-order check or the token check each fails the suites.
 - **No UI** (acceptance criterion; account pages and checkout prefill wait for M8 approval). Legal retention of order records and the privacy notice text are the business's to confirm (ADR 0013).
+- **Evidence (2026-11-12, Node 24.22.3, throwaway Postgres 16.13, fresh DB):** `verify:full` + `VERIFY_UI=1` -> typecheck ok, unit 311/311, env ok (`CUSTOMER_OTP_MODE=off`), migrate deploy ok, schema diff none, integration 337/337, build ok, smoke 46/0, UI 71/0; `npm audit --omit=dev` 0. CI on `backend/m5-customers` @ `e4ae360`: green (run 43194176792, Node 24, both jobs). Code commit `e4ae360`.
 - Open: real OTP delivery (M7); phone-based claims; guest orders are anonymised on erasure only when their email matches.
 ### M4 — admin identity, sessions, roles and audit (`backend/m4-admin-auth`, ADR 0012)
 - T1 `AdminUser` / `AdminSession` / `AuditLog` (migration `20261114090000_admin_auth`, additive). T2 `src/lib/auth/admin.ts`: DB sessions (random token, only its HMAC stored; 8 h absolute, 2 h idle, revocable), `requireAdmin(req, permission)` (401/403), roles `owner|operations|catalog|viewer` via a permission matrix, scrypt passwords, 5-failure/15-minute lockout with one identical 401 for every failure, session replaced on login, logout/deactivation/role/password change revoke at once. T3 same-origin check on every mutation (login/logout included). T4 `npm run admin:bootstrap` (guarded; first owner + owner recovery `--reset`); shared `ADMIN_PASSWORD` kept as a transition login (legacy sessions: owner-level for the dashboard, never `users:manage`; off with `ADMIN_LEGACY_LOGIN=off`). T5 every admin route calls `requireAdmin` and every mutation `writeAudit` (ratchet test); order events/ledger now record the account id. API for accounts, sessions, own password and the audit log. Last active owner is protected (row lock).
