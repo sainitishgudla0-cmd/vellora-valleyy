@@ -12,9 +12,11 @@ import { PAYABLE_PAYMENT_STATUSES } from "@/lib/payment-verification";
 import { orderSchema } from "@/lib/validation";
 
 const svc = vi.hoisted(() => ({ updateOrderAsAdmin: vi.fn() }));
-const authMock = vi.hoisted(() => ({ isAdmin: vi.fn() }));
+const authMock = vi.hoisted(() => ({ requireAdmin: vi.fn() }));
 vi.mock("@/lib/orders/admin-update", () => svc);
-vi.mock("@/lib/admin-auth", () => authMock);
+vi.mock("@/lib/auth/admin", () => authMock);
+vi.mock("@/lib/auth/audit", () => ({ writeAudit: vi.fn(async () => {}) }));
+const ADMIN = { admin: { actorId: "admin-1", userId: "admin-1", label: "a@example.com", role: "owner", legacy: false, sessionId: "s1", can: () => true } };
 
 import { PATCH } from "@/app/api/admin/orders/[id]/route";
 
@@ -50,18 +52,18 @@ describe("PATCH /api/admin/orders/[id] enum boundary", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    authMock.isAdmin.mockResolvedValue(true);
+    authMock.requireAdmin.mockResolvedValue(ADMIN);
     svc.updateOrderAsAdmin.mockResolvedValue({ ok: true, changed: true });
   });
 
   it.each(LEGACY_STATUS)("accepts status %s", async (status) => {
     expect((await call({ status })).status).toBe(200);
-    expect(svc.updateOrderAsAdmin).toHaveBeenCalledWith({ orderId: "o1", status });
+    expect(svc.updateOrderAsAdmin).toHaveBeenCalledWith({ orderId: "o1", adminId: "admin-1", status });
   });
 
   it.each(LEGACY_PAYMENT_STATUS)("accepts paymentStatus %s", async (paymentStatus) => {
     expect((await call({ paymentStatus, reason: "r" })).status).toBe(200);
-    expect(svc.updateOrderAsAdmin).toHaveBeenCalledWith({ orderId: "o1", paymentStatus, reason: "r" });
+    expect(svc.updateOrderAsAdmin).toHaveBeenCalledWith({ orderId: "o1", adminId: "admin-1", paymentStatus, reason: "r" });
   });
 
   it.each([{ status: "shipped" }, { status: "PAID" }, { status: " paid" }, { status: "" }, { status: null }, { paymentStatus: "settled" }, { paymentStatus: "Unpaid" }, { reason: "x".repeat(501) }, { paymentReference: "x".repeat(81) }])(
@@ -73,7 +75,7 @@ describe("PATCH /api/admin/orders/[id] enum boundary", () => {
   );
 
   it("requires an admin session", async () => {
-    authMock.isAdmin.mockResolvedValue(false);
+    authMock.requireAdmin.mockResolvedValue({ response: new Response(null, { status: 401 }) });
     expect((await call({ status: "paid" })).status).toBe(401);
     expect(svc.updateOrderAsAdmin).not.toHaveBeenCalled();
   });

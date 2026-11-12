@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { fail, json, parseBody } from "@/lib/api";
-import { isAdmin } from "@/lib/admin-auth";
+import { requireAdmin } from "@/lib/auth/admin";
+import { writeAudit } from "@/lib/auth/audit";
 import { effectiveInStock } from "@/lib/inventory/availability";
 import { MAX_STOCK_DELTA, updateVariantInventory } from "@/lib/inventory/adjust";
 
@@ -21,26 +22,55 @@ const schema = z
   .refine((b) => b.trackInventory === undefined || b.reason !== undefined, { message: "A reason is required to change inventory tracking", path: ["reason"] });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  if (!(await isAdmin())) return fail("Unauthorized", 401);
+  const auth = await requireAdmin(req, "variants:write");
+  if ("response" in auth) return auth.response;
+  const { admin } = auth;
   const { id } = await params;
   const parsed = await parseBody(req, schema);
   if ("response" in parsed) return parsed.response;
   const { price, inStock, trackInventory, stockAdjust } = parsed.data;
 
-  if (trackInventory !== undefined || stockAdjust) {
-    const r = await updateVariantInventory({ variantId: id, actor: { type: "admin", id: "admin" }, trackInventory, reason: parsed.data.reason, stockAdjust });
-    if (!r.ok) return r.code === "not_found" ? fail(r.message, 404) : conflict(r.code, r.message);
+  // The endpoint is open to catalog and operations staff; each field has its own permission.
+  const touchesCatalog = price !== undefined || inStock !== undefined;
+  const touchesInventory = trackInventory !== undefined || stockAdjust !== undefined;
+  const audit = (outcome: "success" | "rejected" | "denied", extra: Record<string, unknown> = {}) =>
+    writeAudit({
+      action: "variant.update",
+      outcome,
+      admin,
+      targetType: "variant",
+      targetId: id,
+      details: { fields: Object.keys(parsed.data).filter((k) => k !== "reason"), ...(stockAdjust ? { stockDelta: stockAdjust.delta } : {}), ...extra },
+    });
+  if ((touchesCatalog && !admin.can("catalog:write")) || (touchesInventory && !admin.can("inventory:write"))) {
+    await audit("denied");
+    return fail("You do not have permission to change these fields", 403);
+  }
+
+  if (touchesInventory) {
+    const r = await updateVariantInventory({ variantId: id, actor: { type: "admin", id: admin.actorId }, trackInventory, reason: parsed.data.reason, stockAdjust });
+    if (!r.ok) {
+      await audit("rejected", { code: r.code });
+      return r.code === "not_found" ? fail(r.message, 404) : conflict(r.code, r.message);
+    }
   }
 
   const current = await db.variant.findUnique({ where: { id }, select: { trackInventory: true } });
-  if (!current) return fail("Variant not found", 404);
+  if (!current) {
+    await audit("rejected", { code: "not_found" });
+    return fail("Variant not found", 404);
+  }
   const v = await db.variant
     .update({
       where: { id },
       data: { ...(price !== undefined && { price: Math.round(price * 100) }), ...(inStock !== undefined && !current.trackInventory && { inStock }) },
     })
     .catch(() => null);
-  if (!v) return fail("Variant not found", 404);
+  if (!v) {
+    await audit("rejected", { code: "not_found" });
+    return fail("Variant not found", 404);
+  }
+  await audit("success");
   return json({
     ok: true,
     price: v.price,

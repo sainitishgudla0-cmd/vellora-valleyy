@@ -43,6 +43,9 @@ CI and `verify:full` run on Node 24 (use `nvm use 24`); the UI script works on b
 ## Inventory and idempotency (M3)
 `tests/support/inventory.ts` creates throwaway products/variants (slug prefix `m3-fixture-`, customer `SMOKE TEST Stock`) and sets stock through the real ledger, so the seeded catalogue is never touched; every inventory test file ends by asserting `findLedgerDrift()` is empty. Concurrency tests (N parallel orders for the last unit, repeated 20 times; opposite line orders for deadlocks) run against the real Postgres. Order-number collisions are forced by spying on `crypto.randomBytes`. Expiry tests use `fake-razorpay.ts`. `tests/unit/inventory-ratchet.test.ts` fails if any code outside `src/lib/inventory/` writes the stock columns.
 
+## Admin auth (M4)
+`tests/support/admin.ts` creates real accounts and real sessions (no auth mocks), so route tests exercise the production path; `cleanupAdminFixtures` also clears `AuditLog` (disposable DB only). `admin-users.test.ts` has the role × route matrix and runs `scripts/admin-bootstrap.ts` as a child process against the disposable DB (password via env, asserted never printed). `tests/unit/admin-routes-ratchet.test.ts` statically requires `requireAdmin(req, "<perm>")` in every admin handler, `writeAudit(` in every non-GET handler, and no use of the old `isAdmin` in API routes. Smoke and UI tests keep using the shared `ADMIN_PASSWORD` transition login.
+
 ## Conventions
 - Regression test for every fix (it must fail without the fix). Contract tests for every route.
 - Test data uses `SMOKE TEST` / `smoke.` markers and fake credentials (`rzp_test_*`, locally computed HMACs).

@@ -277,3 +277,70 @@ model Subscriber {
   email     String   @unique
   createdAt DateTime @default(now())
 }
+
+/// Staff roles (M4, ADR 0012). Permissions per role live in src/lib/auth/roles.ts.
+enum AdminRole {
+  owner
+  operations
+  catalog
+  viewer
+}
+
+/// An individual staff account. Passwords are stored as scrypt hashes only.
+model AdminUser {
+  id                String         @id @default(cuid())
+  /// lower-cased
+  email             String         @unique
+  name              String
+  passwordHash      String
+  role              AdminRole
+  active            Boolean        @default(true)
+  /// consecutive failed logins; reset on success
+  failedLogins      Int            @default(0)
+  lockedUntil       DateTime?
+  lastLoginAt       DateTime?
+  passwordChangedAt DateTime       @default(now())
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  sessions          AdminSession[]
+}
+
+/// Server-side session. The cookie holds a random token; only its keyed hash is stored, so a database read cannot be replayed.
+/// `legacy` sessions come from the shared ADMIN_PASSWORD (transition only) and have no user.
+model AdminSession {
+  id         String     @id @default(cuid())
+  userId     String?
+  user       AdminUser? @relation(fields: [userId], references: [id], onDelete: Cascade)
+  legacy     Boolean    @default(false)
+  tokenHash  String     @unique
+  userAgent  String?
+  createdAt  DateTime   @default(now())
+  lastSeenAt DateTime   @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// Append-only record of admin logins and mutations. No FK to AdminUser so history survives account changes.
+/// `details` holds ids and changed field names only: never passwords, tokens, reasons or customer data.
+model AuditLog {
+  id          String   @id @default(cuid())
+  /// e.g. "order.update", "login.success"
+  action      String
+  /// success | rejected | denied | failed
+  outcome     String
+  actorUserId String?
+  /// email of the account, "legacy" for the shared password, or "anonymous" for failed logins
+  actorLabel  String
+  actorRole   String?
+  targetType  String?
+  targetId    String?
+  details     String?
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([targetType, targetId])
+}

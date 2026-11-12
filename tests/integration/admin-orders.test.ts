@@ -1,15 +1,15 @@
 /** M2-T6: admin PATCH through the real route, state machine and Postgres. */
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
+import { cleanupAdminFixtures, createTestAdmin } from "../support/admin";
 import { cleanupFixtures, createFixtureOrder, createMockOrderWithAttempt, createRazorpayOrderWithAttempt } from "../support/mock-orders";
-
-const auth = vi.hoisted(() => ({ isAdmin: vi.fn(async () => true) }));
-vi.mock("@/lib/admin-auth", () => auth);
 
 import { PATCH } from "@/app/api/admin/orders/[id]/route";
 
+let admin: Awaited<ReturnType<typeof createTestAdmin>>;
+let cookie: string | undefined;
 const patch = async (id: string, body: unknown) => {
-  const res = await PATCH(new Request("http://localhost/api/admin/orders/x", { method: "PATCH", body: JSON.stringify(body) }), { params: Promise.resolve({ id }) });
+  const res = await PATCH(new Request("http://localhost/api/admin/orders/x", { method: "PATCH", headers: cookie ? { cookie } : {}, body: JSON.stringify(body) }), { params: Promise.resolve({ id }) });
   return { status: res.status, body: (await res.json()) as Record<string, any> };
 };
 const load = (id: string) => db.order.findUniqueOrThrow({ where: { id }, include: { payments: true } });
@@ -22,9 +22,13 @@ async function codOrder(status: "pending_confirmation" | "confirmed" | "dispatch
   return order;
 }
 
-beforeEach(() => auth.isAdmin.mockResolvedValue(true));
+beforeEach(async () => {
+  admin ??= await createTestAdmin("owner");
+  cookie = admin.cookie;
+});
 afterAll(async () => {
   await cleanupFixtures();
+  await cleanupAdminFixtures();
   await db.$disconnect();
 });
 
@@ -35,7 +39,7 @@ describe("status transitions", () => {
     expect(await load(o.id)).toMatchObject({ status: "delivered", paymentStatus: "unpaid" }); // delivery never implies payment
     const ev = await events(o.id);
     expect(ev.map((e) => `${e.fromStatus}>${e.toStatus}`)).toEqual(["pending_confirmation>confirmed", "confirmed>dispatched", "dispatched>delivered"]);
-    expect(ev.every((e) => e.actorType === "admin" && e.actorId === "admin" && e.reason)).toBe(true);
+    expect(ev.every((e) => e.actorType === "admin" && e.actorId === admin.user.id && e.reason)).toBe(true);
   });
 
   it("an explicit reason is recorded", async () => {
@@ -99,9 +103,9 @@ describe("status transitions", () => {
 
   it("unauthorised → 401, unknown order → 404, bad value → 422, nothing written", async () => {
     const o = await codOrder("confirmed");
-    auth.isAdmin.mockResolvedValue(false);
+    cookie = undefined;
     expect((await patch(o.id, { status: "dispatched" })).status).toBe(401);
-    auth.isAdmin.mockResolvedValue(true);
+    cookie = admin.cookie;
     expect((await patch("does-not-exist", { status: "dispatched" })).status).toBe(404);
     expect((await patch(o.id, { status: "shipped" })).status).toBe(422);
     expect((await load(o.id)).status).toBe("confirmed");
@@ -126,7 +130,7 @@ describe("manual payment confirmation (request-only orders)", () => {
     expect(after.payments[0]).toMatchObject({ status: "paid", manualReference: `RCPT-${o.number.slice(-6)}`, provider: "request_only", providerPaymentId: null });
     const ev = await events(o.id);
     expect(ev).toHaveLength(1);
-    expect(ev[0]).toMatchObject({ actorType: "admin", actorId: "admin", fromPaymentStatus: "unpaid", toPaymentStatus: "paid", reason: "Cash collected on delivery", paymentReference: `RCPT-${o.number.slice(-6)}`, fromStatus: "delivered", toStatus: "delivered" });
+    expect(ev[0]).toMatchObject({ actorType: "admin", actorId: admin.user.id, fromPaymentStatus: "unpaid", toPaymentStatus: "paid", reason: "Cash collected on delivery", paymentReference: `RCPT-${o.number.slice(-6)}`, fromStatus: "delivered", toStatus: "delivered" });
   });
 
   it("a repeat is an idempotent no-op", async () => {

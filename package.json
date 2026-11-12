@@ -26,6 +26,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:setup": "npm run db:migrate:deploy && npm run db:seed",
     "payments:reconcile": "tsx scripts/db-guard.ts \"payments reconcile\" --production && tsx --conditions=react-server scripts/reconcile-payments.ts",
+    "admin:bootstrap": "tsx scripts/db-guard.ts \"admin bootstrap\" --production && tsx --conditions=react-server scripts/admin-bootstrap.ts",
     "payments:mock-checkout": "tsx scripts/mock-checkout.ts",
     "db:cleanup-tests": "tsx --conditions=react-server scripts/cleanup-test-data.ts",
     "postinstall": "prisma generate"

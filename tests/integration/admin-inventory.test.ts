@@ -4,31 +4,33 @@ import { db } from "@/lib/db";
 import { createOrder } from "@/lib/orders";
 import { toView } from "@/lib/catalog";
 import { findLedgerDrift } from "@/lib/inventory/ledger";
+import { cleanupAdminFixtures, createTestAdmin } from "../support/admin";
 import { cleanupInventoryFixtures, createInventoryVariant, customer, movements, variantState } from "../support/inventory";
-
-const auth = vi.hoisted(() => ({ isAdmin: vi.fn(async () => true) }));
-vi.mock("@/lib/admin-auth", () => auth);
 
 import { PATCH } from "@/app/api/admin/variants/[id]/route";
 import { GET as lowStock } from "@/app/api/admin/variants/low-stock/route";
 import { DELETE as removeTestData } from "@/app/api/admin/test-data/route";
 import { POST as cartValidate } from "@/app/api/cart/validate/route";
 
+let admin: Awaited<ReturnType<typeof createTestAdmin>>;
+let cookie: string | undefined;
 const patch = async (id: string, body: unknown) => {
-  const res = await PATCH(new Request("http://localhost/api/admin/variants/x", { method: "PATCH", body: JSON.stringify(body) }), { params: Promise.resolve({ id }) });
+  const res = await PATCH(new Request("http://localhost/api/admin/variants/x", { method: "PATCH", headers: cookie ? { cookie } : {}, body: JSON.stringify(body) }), { params: Promise.resolve({ id }) });
   return { status: res.status, body: (await res.json()) as Record<string, any> };
 };
 const low = async (qs = "") => {
-  const res = await lowStock(new Request(`http://localhost/api/admin/variants/low-stock${qs}`));
+  const res = await lowStock(new Request(`http://localhost/api/admin/variants/low-stock${qs}`, { headers: cookie ? { cookie } : {} }));
   return { status: res.status, body: (await res.json()) as Record<string, any> };
 };
 
-beforeEach(() => {
-  auth.isAdmin.mockResolvedValue(true);
+beforeEach(async () => {
+  admin ??= await createTestAdmin("owner");
+  cookie = admin.cookie;
   vi.stubEnv("APP_ENV", "test");
   vi.stubEnv("PAYMENT_MODE", "request_only");
 });
 afterAll(async () => {
+  await cleanupAdminFixtures();
   expect(await findLedgerDrift()).toEqual([]);
   await cleanupInventoryFixtures();
   await db.$disconnect();
@@ -36,7 +38,7 @@ afterAll(async () => {
 
 describe("PATCH /api/admin/variants/[id]", () => {
   it("requires an admin", async () => {
-    auth.isAdmin.mockResolvedValue(false);
+    cookie = undefined;
     const t = await createInventoryVariant({ stock: 1 });
     expect((await patch(t.variantId, { stockAdjust: { delta: 1, reason: "x y z" } })).status).toBe(401);
     expect((await low()).status).toBe(401);
@@ -65,7 +67,7 @@ describe("PATCH /api/admin/variants/[id]", () => {
     expect(await patch(u.variantId, { stockAdjust: { delta: -3, reason: "Damaged in storage" } })).toMatchObject({ status: 200, body: { stockQuantity: 17 } });
     expect(await patch(u.variantId, { stockAdjust: { delta: -18, reason: "Recount error" } })).toMatchObject({ status: 409, body: { code: "negative_stock" } });
     expect(await variantState(u.variantId)).toMatchObject({ stockQuantity: 17 });
-    expect((await movements(u.variantId)).map((m) => [m.stockDelta, m.note, m.actorType, m.actorId])).toEqual([[20, "Opening stock count", "admin", "admin"], [-3, "Damaged in storage", "admin", "admin"]]);
+    expect((await movements(u.variantId)).map((m) => [m.stockDelta, m.note, m.actorType, m.actorId])).toEqual([[20, "Opening stock count", "admin", admin.user.id], [-3, "Damaged in storage", "admin", admin.user.id]]);
   });
 
   it("validates input: delta must be a non-zero whole number, reasons are required, tracking changes need a reason", async () => {
@@ -136,7 +138,7 @@ describe("test-data cleanup releases held stock", () => {
     const t = await createInventoryVariant({ stock: 5 });
     await createOrder({ ...customer, paymentMethod: "cod", items: [{ variantId: t.variantId, quantity: 3 }] });
     expect(await variantState(t.variantId)).toMatchObject({ reserved: 3 });
-    const res = await removeTestData();
+    const res = await removeTestData(new Request("http://localhost/api/admin/test-data", { method: "DELETE", headers: { cookie: admin.cookie } }));
     expect(res.status).toBe(200);
     expect(await variantState(t.variantId)).toMatchObject({ stockQuantity: 5, reserved: 0 });
     expect((await movements(t.variantId)).at(-1)).toMatchObject({ reason: "release", reservedDelta: -3, orderId: null }); // the order row is gone; the ledger row stays (order link set null)

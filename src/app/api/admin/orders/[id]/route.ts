@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { OrderStatus, PaymentStatus } from "@prisma/client";
 import { fail, json, parseBody } from "@/lib/api";
-import { isAdmin } from "@/lib/admin-auth";
+import { requireAdmin } from "@/lib/auth/admin";
+import { writeAudit } from "@/lib/auth/audit";
 import { updateOrderAsAdmin } from "@/lib/orders/admin-update";
 
 const schema = z.object({
@@ -17,13 +18,21 @@ const schema = z.object({
 
 /** Contract: docs/API-CONTRACTS.md (Admin). Every change goes through the order state machine (ADR 0010). */
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  if (!(await isAdmin())) return fail("Unauthorized", 401);
+  const auth = await requireAdmin(req, "orders:write");
+  if ("response" in auth) return auth.response;
   const { id } = await params;
   const parsed = await parseBody(req, schema);
   if ("response" in parsed) return parsed.response;
 
-  const r = await updateOrderAsAdmin({ orderId: id, ...parsed.data });
-  if (r.ok) return json({ ok: true });
+  const r = await updateOrderAsAdmin({ orderId: id, ...parsed.data, adminId: auth.admin.actorId });
+  // ids and field names only: the free-text reason and payment reference live on the OrderEvent, not here
+  const base = { action: "order.update", admin: auth.admin, targetType: "order", targetId: id } as const;
+  const changed = { status: parsed.data.status, paymentStatus: parsed.data.paymentStatus };
+  if (r.ok) {
+    await writeAudit({ ...base, outcome: "success", details: { ...changed, changed: r.changed } });
+    return json({ ok: true });
+  }
+  await writeAudit({ ...base, outcome: "rejected", details: { ...changed, code: r.code } });
   switch (r.code) {
     case "not_found":
       return fail("Order not found", 404);
