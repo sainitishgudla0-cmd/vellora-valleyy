@@ -26,6 +26,7 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 - Code touched: `prisma/schema.prisma`, admin `PATCH /orders/[id]` (zod derived from Prisma enums; 422 behaviour unchanged), integration test typing. Inventory: only `orders.ts`, `payment-verification.ts`, verify route, `orders` route, admin page/controls, order page read/write these fields; all compile unchanged. No frontend file changed.
 - Tests added: `tests/unit/status-enums.test.ts` (28), `tests/integration/enum-migration.test.ts` (scratch DBs: 10 legacy rows preserved, empty table, 5 unknown-value aborts atomic, multi-offender message, no drift), `tests/integration/order-enums.test.ts`.
 - **Evidence (2026-11-11, throwaway Postgres 16.13 @127.0.0.1:54329, fresh DB):** `verify:full` with `VERIFY_UI=1` → typecheck ✓ · unit 97/97 ✓ · env ✓ · migrate deploy ✓ · schema diff "No difference detected" ✓ · seed ✓ · integration 21/21 ✓ · build ✓ · smoke 41/0 ✓ · UI 51/0 ✓.
+- CI on `backend/m2-payments` @ `47f939a`: green (run 43140441114, both jobs, incl. the migration rehearsal tests on Linux Postgres 16). Code commit: `47f939a`.
 - Not done / unverified: rehearsal on a copy of production data (operator step, before release). Production not touched.
 ### M1 — foundation and safety (`backend/m1-foundation`)
 - Build/DB separation, `0_init` baseline, guarded `db:*` scripts (ADR 0001).
