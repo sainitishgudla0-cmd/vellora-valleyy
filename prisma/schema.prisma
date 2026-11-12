@@ -85,6 +85,8 @@ model Order {
   status            OrderStatus
   paymentMethod     PaymentMethod
   paymentStatus     PaymentStatus @default(unpaid)
+  /// Server-resolved PAYMENT_MODE of the provider that handled this order. NULL = legacy/unclassified (created before M2-T4; never guessed).
+  paymentMode       PaymentMode?
   customerName      String
   email             String
   phone             String

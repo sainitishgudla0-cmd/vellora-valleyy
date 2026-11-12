@@ -8,7 +8,8 @@ import { ProviderUnavailableError, type PaymentProvider } from "./types";
  * checks below are a second, independent barrier so a mis-wired caller still cannot build one.
  */
 const MOCK_ENVS = new Set(["development", "test"]);
-export const MOCK_LABEL = "MOCK — no money moved";
+export { MOCK_PAYMENT_LABEL as MOCK_LABEL } from "../labels";
+import { MOCK_PAYMENT_LABEL } from "../labels";
 
 /** Not a secret: the mock is unreachable outside development/test. It only keeps the proof shape realistic. */
 const mockSignature = (providerOrderId: string, providerPaymentId: string) =>
@@ -28,7 +29,7 @@ export function createMockProvider(config: Pick<PaymentConfig, "mode" | "appEnv"
     id: "mock",
     mode: "mock",
     online: true,
-    label: MOCK_LABEL,
+    label: MOCK_PAYMENT_LABEL,
     async createPayment(req) {
       const providerOrderId = mockProviderOrderId(req.orderNumber);
       return {

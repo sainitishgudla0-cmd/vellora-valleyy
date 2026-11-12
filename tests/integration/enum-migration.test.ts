@@ -119,7 +119,7 @@ describe("order/payment enum migration on representative legacy data", () => {
     await expect(insertLegacy(client, "paid", "bank_transfer", "paid")).rejects.toThrow();
 
     // Prisma Client reads/writes the converted table with unchanged JSON values.
-    const rows = await client.order.findMany({ where: { paymentStatus: "unpaid", status: "pending_confirmation" }, orderBy: { number: "asc" } });
+    const rows = await client.order.findMany({ where: { paymentStatus: "unpaid", status: "pending_confirmation" }, orderBy: { number: "asc" }, select: { status: true, paymentMethod: true, paymentStatus: true } });
     expect(rows.length).toBeGreaterThanOrEqual(2);
     expect(JSON.parse(JSON.stringify(rows[0]))).toMatchObject({ status: "pending_confirmation", paymentMethod: "cod", paymentStatus: "unpaid" });
   });

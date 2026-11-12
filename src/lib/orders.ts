@@ -3,6 +3,8 @@ import crypto from "node:crypto";
 import { db } from "./db";
 import { site } from "@/config/site";
 import type { OrderInput } from "./validation";
+import { resolveOrderPaymentMode } from "./orders/payment-mode";
+import { safePaymentConfig } from "./payments";
 
 export class OrderError extends Error {
   constructor(message: string, public status = 400) {
@@ -50,6 +52,9 @@ export async function createOrder(input: OrderInput) {
   const total = subtotal + deliveryFee;
 
   const isOnline = input.paymentMethod === "razorpay";
+  // server-resolved (trusted configuration); the request body has no say in the mode
+  const paymentMode = resolveOrderPaymentMode(input.paymentMethod, safePaymentConfig());
+  if (!paymentMode) throw new OrderError("This payment method is not available.", 400);
   return db.order.create({
     data: {
       number: orderNumber(),
@@ -57,6 +62,7 @@ export async function createOrder(input: OrderInput) {
       status: isOnline ? "awaiting_payment" : "pending_confirmation",
       paymentMethod: input.paymentMethod,
       paymentStatus: "unpaid",
+      paymentMode,
       customerName: input.customerName,
       email: input.email,
       phone: input.phone,

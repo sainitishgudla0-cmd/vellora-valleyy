@@ -3,25 +3,33 @@
 _Read this first in a new session. Keep it under ~80 lines. Scope and AC per task: `BACKEND-ROADMAP.md`._
 
 ## Current
-- **Milestone:** M2 in progress on `backend/m2-payments`. M2-T1..T3 done. T4+ need approval.
-- **Branch:** M1 is integrated: `backend/development` = `3d3f00c` (M2-T2 integrated by fast-forward, no PR workflow). CI on it is green (run 43142853847). `main` = `55aa848`, untouched.
+- **Milestone:** M2 in progress on `backend/m2-payments`. M2-T1..T4 done. T5+ need approval.
+- **Branch:** M1 is integrated: `backend/development` = `52f561a` (M2-T3 integrated by fast-forward, no PR workflow). CI green (run 43145834588). Working copy moved to `~/Developer/Velora-Valley` (the Desktop copy is iCloud-synced and spawns duplicate files). `main` = `55aa848`, untouched.
 - **Last verified:** 2026-11-11, `npm run verify:full` on throwaway Postgres 16 (127.0.0.1): all gates green. See the M1 evidence below.
 
 ## Next up
 | Task | Status | Notes |
 |---|---|---|
-| M2-T4 mock flow | proposed (needs approval) | next; adds `Order.paymentMode`, `POST /api/payments/mock/confirm`, MOCK label copy (copy needs user approval) |
-| M2-T5..T6 | proposed | see `BACKEND-ROADMAP.md` M2 |
+| M2-T5 move routes onto providers + state machine | proposed (needs approval) | next; checkout must create mock orders/attempts (`Order.paymentMode`, `Payment`) and a server-side/dev-only trigger for `mock/confirm` (browser cannot hold the key); lowers the ratchet; `Order.paymentMode` for `/verify` Razorpay orders |
+| M2-T6 | proposed | see `BACKEND-ROADMAP.md` M2 |
 
 ## Blockers / open items
 1. **Preview DB isolation unverified.** Vercel project settings weren't accessible (local CLI account can't see the production team; Vercel MCP unauthorised). GitHub shows no Vercel deployments or statuses for this repo, so previews don't appear to be Git-triggered. M1 builds are DB-write-free regardless; reads during a preview build would still use whatever `DATABASE_URL` preview has. Owner: user (Vercel dashboard).
 2. **Production not baselined** onto Prisma Migrate (`docs/RUNBOOK-DATABASE.md`). Operator task, planned in M9-T1 or before the first production migration.
 3. (resolved) CI green on `backend/development` @ `38b476e`.
 4. Dev-dependency advisories: `postcss` (high), `esbuild` via `tsx` (moderate). Prod deps clean. Tracked as M9-T9.
-5. Untracked "<name> 2.<ext>" duplicate files keep appearing in the working tree (looks like iCloud/Desktop sync conflicts; not committed, not created by tooling). Consider moving the repo out of a synced Desktop folder.
+5. (resolved 2026-11-12) iCloud sync duplicates ("<name> 2.ext") in `~/Desktop/Velora Valley`; repo relocated to `~/Developer/Velora-Valley`. Stage files by explicit path only (never `git add .` / `git add docs`).
 6. Local Node is 20.19.6; project targets 24 (`.nvmrc`, CI uses 24).
 
 ## Done
+### M2-T4 — mock payment confirmation + order payment mode (ADR 0008)
+- `Order.paymentMode` (nullable; legacy NULL, never guessed; set server-side by `resolveOrderPaymentMode` in `createOrder`: COD → `request_only`, online → configured mode) with DB CHECKs (mode/method pairing, mock orders cannot hold Razorpay ids, `Payment` provider/mode pairing, mock payments only `mock_pay_*` ids). Migration `20261112031641_order_payment_mode` (additive).
+- `POST /api/payments/mock/confirm`: 404 unless server mode is `mock` in development/test and `MOCK_PAYMENT_CONFIRM_KEY` is set; rate limit → `x-mock-confirm-key` (401) → strict body (422) → `confirmMockPayment`: order must be a mock order with a matching mock attempt, valid proof, amount/currency match; Payment claim + `transitionOrder` (new optional `tx` param) in one transaction; idempotent; cancelled/stale/mismatch → 409.
+- Labels: order page and admin show `MOCK — no money moved` (only frontend files touched: `src/app/order/[number]/page.tsx`, `src/app/admin/page.tsx`); admin "to action" count excludes mock-paid.
+- Tests: `unit/mock-payment.test.ts`, `integration/mock-confirm.test.ts` (28: confirm, idempotency, 8-way race, cancelled, cancel-vs-confirm race, bad proofs, cross-order proof, amount/currency mismatch, non-mock orders refused, 401/422/429/404 matrix incl. preview/production, no network, log hygiene, trigger-injected rollback of OrderEvent and Order writes), `integration/order-payment-mode.test.ts` (constraints, legacy NULL, createOrder modes, rendered labels). Fixtures only in `tests/support/mock-orders.ts`.
+- **Evidence (2026-11-12, throwaway Postgres 16.13, fresh DB, `~/Developer/Velora-Valley`):** `verify:full` + `VERIFY_UI=1` → typecheck ✓ · unit 214/214 ✓ · env ✓ · migrate deploy ✓ · schema diff none ✓ · integration 72/72 ✓ · build ✓ · smoke 41/0 ✓ · UI 51/0 ✓.
+- Incomplete until T5: public checkout does not create mock orders/attempts, nothing calls `mock/confirm`, `/verify` and `/api/orders` still write order status directly (ratchet unchanged: 3 files).
+- Local note: a `cp -c`-cloned `node_modules` made `next build` fail with a Turbopack `next/font/google` error; a fresh `npm ci` fixed it (so that error is not always a Google network flake).
 ### M2-T3 — Payment model + providers (ADR 0007)
 - `src/lib/payments/providers/{types,request-only,mock,razorpay,index}.ts`; `payments.ts` is now a facade (old exports unchanged, adds `currentPaymentProvider()`); `payments/records.ts` `recordPaymentAttempt`. request_only can never verify a payment (no automatic offline confirmation); mock is labelled, offline, and its factory refuses anything but mode=mock in development/test; razorpay is the old code moved (same request/HMAC). Additive migration `20261112025437_payment_attempts` (`Payment`, `PaymentProvider`, `PaymentMode`). No route or frontend change (routes move in T5).
 - CI on `backend/m2-payments`: code commit `d72f0ca`; run 43145197561 (tip `Remove sync-conflict duplicate docs…`) failed once in `next build` with a `next/font/google` fetch error (runner network; tests and typecheck passed), green on re-run of the failed job. Note: the build fetches Google Fonts at build time, a recurring flake risk (consider self-hosting via `next/font/local` in a UI-approved task). `d72f0ca` accidentally included 7 sync-duplicate docs ("<name> 2.md"); removed in the next commit, net tree clean.

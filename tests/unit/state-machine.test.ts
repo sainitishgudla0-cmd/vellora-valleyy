@@ -142,6 +142,14 @@ describe("transitionOrder", () => {
     expect(tx.orderEvent.create.mock.calls[0][0].data).toMatchObject({ fromPaymentStatus: null, toPaymentStatus: null, reason: "called", actorId: "admin" });
   });
 
+  it("joins a caller-supplied transaction instead of opening its own", async () => {
+    const r = await transitionOrder({ orderId: "o1", from: "awaiting_payment", to: "paid", payment: { from: "unpaid", to: "paid" }, actor: GATEWAY }, tx as never);
+    expect(r.ok).toBe(true);
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+    expect(tx.order.updateMany).toHaveBeenCalledTimes(1);
+    expect(tx.orderEvent.create).toHaveBeenCalledTimes(1);
+  });
+
   it("invalid requests never open a transaction", async () => {
     const r = await transitionOrder({ orderId: "o1", from: "delivered", to: "pending_confirmation", actor: SYSTEM });
     expect(r).toMatchObject({ ok: false, code: "invalid_transition" });

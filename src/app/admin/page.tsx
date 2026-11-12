@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { adminConfigured, isAdmin } from "@/lib/admin-auth";
 import { onlinePaymentsEnabled } from "@/lib/payments";
 import { formatPrice } from "@/lib/format";
+import { MOCK_PAYMENT_LABEL } from "@/lib/payments/labels";
 import { BUSINESS_INTERESTS } from "@/lib/validation";
 import { AdminLogin, AdminLogout, EnquiryStatus, OrderStatusSelect, RemoveTestData, VariantEditor } from "@/components/admin/AdminControls";
 import { TEST_ENQUIRY_WHERE, TEST_ORDER_WHERE, TEST_SUBSCRIBER_WHERE } from "@/lib/test-data";
@@ -29,7 +30,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
     tab === "enquiries" ? db.enquiry.findMany({ orderBy: { createdAt: "desc" }, take: 200 }) : Promise.resolve([]),
     tab === "products" ? db.product.findMany({ orderBy: { sortOrder: "asc" }, include: { variants: { orderBy: { sortOrder: "asc" } } } }) : Promise.resolve([]),
     db.subscriber.count(),
-    db.order.count({ where: { status: { in: ["pending_confirmation", "paid"] } } }),
+    // mock-paid orders are test data, never "to action" (no fulfilment)
+    db.order.count({ where: { OR: [{ status: "pending_confirmation" }, { status: "paid", OR: [{ paymentMode: null }, { paymentMode: { not: "mock" } }] }] } }),
     db.enquiry.count({ where: { status: "new" } }),
     db.order.count({ where: TEST_ORDER_WHERE }),
     db.enquiry.count({ where: TEST_ENQUIRY_WHERE }),
@@ -117,9 +119,15 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
                     </td>
                     <td className="py-3 pr-3 font-medium">{formatPrice(o.total)}</td>
                     <td className="py-3 pr-3">
-                      {o.paymentMethod === "cod" ? "Pay on delivery" : "Razorpay"}
+                      {o.paymentMethod === "cod" ? "Pay on delivery" : o.paymentMode === "mock" ? "Online (mock)" : "Razorpay"}
                       <br />
-                      <span className={o.paymentStatus === "paid" ? "text-leaf" : "text-forest/60"}>{o.paymentStatus}</span>
+                      <span className={o.paymentStatus === "paid" && o.paymentMode !== "mock" ? "text-leaf" : "text-forest/60"}>{o.paymentStatus}</span>
+                      {o.paymentMode === "mock" && (
+                        <>
+                          <br />
+                          <span className="font-medium text-forest">{MOCK_PAYMENT_LABEL}</span>
+                        </>
+                      )}
                     </td>
                     <td className="py-3">
                       <OrderStatusSelect id={o.id} status={o.status} />

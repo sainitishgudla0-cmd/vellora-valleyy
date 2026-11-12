@@ -64,3 +64,13 @@ Internal module only; no HTTP contract changes yet. `OrderEvent` rows are writte
 
 ## Payment providers (M2-T3, ADR 0007)
 Internal modules only; no HTTP contract changes. `Payment` rows are not written by any route yet (M2-T5).
+
+## Mock payment confirm
+`POST /api/payments/mock/confirm` (ADR 0008). **Development/test only**: `404` unless the server's resolved `PAYMENT_MODE` is `mock` and `APP_ENV` is `development|test`, and `MOCK_PAYMENT_CONFIRM_KEY` (24+ chars) is set. Not used by the storefront.
+- Headers: `x-mock-confirm-key: <MOCK_PAYMENT_CONFIRM_KEY>`. Rate limit 30 per 10 min per IP (checked before the key).
+- Body (strict, extra fields -> `422`): `{ orderNumber, token, providerOrderId, providerPaymentId, signature }` where the last three are the mock provider's deterministic identifiers/proof.
+- `200 { ok, mock: true, label: "MOCK — no money moved" }` (first confirmation) · `200 { ok, alreadyConfirmed: true, mock, label }` (idempotent repeat) · `400` invalid proof · `401` missing/wrong key · `404` disabled environment/mode, unknown order, wrong token, or an order/attempt not created as mock (request-only, Razorpay, legacy NULL) · `409` cancelled/not payable, amount or currency mismatch, different payment id, stale · `422` · `429`.
+- Writes (one transaction): `Payment` unpaid -> paid with `providerPaymentId`, order `awaiting_payment -> paid` / payment `unpaid -> paid` via the state machine, one `OrderEvent` (`system`/`mock-provider`). Nothing else changes; Razorpay columns stay NULL.
+
+## Order payment mode (M2-T4)
+`Order.paymentMode`: `request_only` (all pay-on-delivery orders) · `mock` · `razorpay_test` · `razorpay_live` · `NULL` (legacy, unclassified). Set server-side at creation. Not in any response body today; the order page and admin show `MOCK — no money moved` for `mock`.

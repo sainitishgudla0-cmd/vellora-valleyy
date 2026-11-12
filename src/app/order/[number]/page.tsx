@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { site } from "@/config/site";
 import { ORDER_STATUS_LABEL } from "@/lib/orders";
 import { formatPrice } from "@/lib/format";
+import { MOCK_PAYMENT_LABEL } from "@/lib/payments/labels";
 import { Frame, HexBadge } from "@/components/ui/Ornaments";
 
 export const metadata: Metadata = { title: "Your order", robots: { index: false } };
@@ -16,11 +17,14 @@ export default async function OrderPage(props: { params: Promise<{ number: strin
   // the access token keeps order details private to the person who placed it
   if (!order || !searchParams.t || searchParams.t !== order.accessToken) notFound();
 
+  const mock = order.paymentMode === "mock";
   const paid = order.paymentStatus === "paid";
   const awaitingPayment = order.status === "awaiting_payment" || searchParams.payment === "failed";
 
-  const headline = paid ? "Thank you! Payment received." : awaitingPayment ? "Payment not completed" : "Thank you! Order request received.";
-  const message = paid
+  const headline = paid && mock ? "Mock payment recorded." : paid ? "Thank you! Payment received." : awaitingPayment ? "Payment not completed" : "Thank you! Order request received.";
+  const message = paid && mock
+    ? `Order ${order.number} was marked paid by the mock payment provider (${MOCK_PAYMENT_LABEL}). It is a test order and will not be fulfilled.`
+    : paid
     ? `Your payment for order ${order.number} has been verified. Our team will contact you on ${order.phone} with dispatch details.`
     : awaitingPayment
       ? `We have saved order ${order.number}, but the online payment was not completed and no payment has been recorded. Please contact us to complete it, or place the order again with pay on delivery.`
@@ -37,6 +41,7 @@ export default async function OrderPage(props: { params: Promise<{ number: strin
             <p className="mt-4 inline-block rounded-full bg-forest px-3 py-1 text-[11px] uppercase tracking-wider text-cream">
               Status: {ORDER_STATUS_LABEL[order.status] ?? order.status}
             </p>
+            {mock && <p className="mt-2 text-[11px] font-medium uppercase tracking-wider text-forest">{MOCK_PAYMENT_LABEL}</p>}
           </HexBadge>
         </div>
 
@@ -84,7 +89,8 @@ export default async function OrderPage(props: { params: Promise<{ number: strin
               {order.city}, {order.state} {order.pincode}
             </address>
             <p className="mt-4 text-forest/70">
-              Payment: {order.paymentMethod === "cod" ? "Pay on delivery" : "Online (Razorpay)"} — {order.paymentStatus}
+              Payment: {order.paymentMethod === "cod" ? "Pay on delivery" : mock ? "Online (mock)" : "Online (Razorpay)"} — {order.paymentStatus}
+              {mock && <span className="ml-1 font-medium text-forest">· {MOCK_PAYMENT_LABEL}</span>}
             </p>
           </Frame>
         </div>

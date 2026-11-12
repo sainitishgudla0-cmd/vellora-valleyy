@@ -99,39 +99,47 @@ export function validateTransition(input: Omit<TransitionInput, "orderId" | "dat
   return null;
 }
 
+/** A Prisma transaction client, for callers that must commit other writes atomically with a transition. */
+export type TransitionTx = Prisma.TransactionClient;
+
 /**
  * Apply a validated transition atomically. Never throws for expected outcomes; database failures propagate.
  * The conditional `updateMany` is the concurrency guard: if another writer changed the order first, no
  * row matches, nothing is written, and the caller gets `stale_state` with the order's current statuses.
+ *
+ * By default the update and the `OrderEvent` run in their own transaction. A trusted service that must
+ * commit more rows with the same transition (e.g. the `Payment` attempt) passes its own transaction client
+ * as `tx`: the transition then joins that transaction, so everything commits or rolls back together. A
+ * non-ok result writes nothing, but the caller decides whether to abort its transaction.
  */
-export async function transitionOrder(input: TransitionInput): Promise<TransitionResult> {
+export async function transitionOrder(input: TransitionInput, tx?: TransitionTx): Promise<TransitionResult> {
   const invalid = validateTransition(input);
   if (invalid) return invalid;
+  return tx ? applyTransition(tx, input) : db.$transaction((t) => applyTransition(t, input));
+}
 
+async function applyTransition(tx: TransitionTx, input: TransitionInput): Promise<TransitionResult> {
   const { orderId, from, to, payment, actor, data } = input;
   const reason = input.reason?.trim() || null;
-
-  return db.$transaction(async (tx) => {
-    const updated = await tx.order.updateMany({
-      where: { id: orderId, status: from, ...(payment ? { paymentStatus: payment.from } : {}) },
-      data: { status: to, ...(payment ? { paymentStatus: payment.to } : {}), ...data },
-    });
-    if (updated.count === 0) {
-      const current = await tx.order.findUnique({ where: { id: orderId }, select: { status: true, paymentStatus: true } });
-      return current ? fail("stale_state", "Order changed since it was read", current) : fail("not_found", "Order not found");
-    }
-    const event = await tx.orderEvent.create({
-      data: {
-        orderId,
-        fromStatus: from,
-        toStatus: to,
-        fromPaymentStatus: payment?.from ?? null,
-        toPaymentStatus: payment?.to ?? null,
-        actorType: actor.type,
-        actorId: actor.id ?? null,
-        reason,
-      },
-    });
-    return { ok: true as const, event };
+  const updated = await tx.order.updateMany({
+    where: { id: orderId, status: from, ...(payment ? { paymentStatus: payment.from } : {}) },
+    data: { status: to, ...(payment ? { paymentStatus: payment.to } : {}), ...data },
   });
+  if (updated.count === 0) {
+    const current = await tx.order.findUnique({ where: { id: orderId }, select: { status: true, paymentStatus: true } });
+    return current ? fail("stale_state", "Order changed since it was read", current) : fail("not_found", "Order not found");
+  }
+  const event = await tx.orderEvent.create({
+    data: {
+      orderId,
+      fromStatus: from,
+      toStatus: to,
+      fromPaymentStatus: payment?.from ?? null,
+      toPaymentStatus: payment?.to ?? null,
+      actorType: actor.type,
+      actorId: actor.id ?? null,
+      reason,
+    },
+  });
+  return { ok: true as const, event };
 }

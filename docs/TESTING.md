@@ -33,6 +33,9 @@ npm run verify:full
 ```
 Stop it with `pg_ctl -D "$PGDATA_DIR" stop`, and delete the folder to reset.
 
+## Mock payments (M2-T4)
+Mock orders and attempts exist only in test fixtures (`tests/support/mock-orders.ts`); integration tests call the real `POST /api/payments/mock/confirm` handler with `PAYMENT_MODE=mock`, `APP_ENV=test` and a fake `MOCK_PAYMENT_CONFIRM_KEY` stubbed in-process. Failure injection uses temporary Postgres triggers on the disposable database. Nothing in CI or `verify:full` needs the key; the running smoke/UI server stays `request_only`.
+
 ## Conventions
 - Regression test for every fix (it must fail without the fix). Contract tests for every route.
 - Test data uses `SMOKE TEST` / `smoke.` markers and fake credentials (`rzp_test_*`, locally computed HMACs).
