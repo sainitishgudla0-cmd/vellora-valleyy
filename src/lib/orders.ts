@@ -50,10 +50,37 @@ function isUniqueViolationOn(e: unknown, column: string) {
  * insert the order, its lines and its payment attempt, and claim the idempotency key if one was sent. Any failure
  * rolls all of it back, so a refused order never leaves a hold behind.
  */
-export async function createOrder(input: OrderInput, opts: { idempotency?: IdempotencyClaim; customerId?: string | null } = {}) {
+export interface WholesaleHooks {
+  businessAccountId: string;
+  /**
+   * Runs inside the order transaction with the loaded variants and merged quantities. Returns the unit price (paise) per
+   * variant id, and throws an OrderError for anything the buyer's terms forbid (MOQ, case pack). Retail orders never set this.
+   */
+  priceLines: (tx: Prisma.TransactionClient, lines: { variant: { id: string; price: number; mrp: number; name: string; label: string }; quantity: number }[]) => Promise<Map<string, number>>;
+  /** Delivery fee in paise; defaults to the site fee. */
+  deliveryFee?: number;
+  /** Runs once totals are known, before anything is written (credit limit). Throw to refuse. */
+  beforeCreate?: (tx: Prisma.TransactionClient, totals: { subtotal: number; total: number }) => Promise<void>;
+  /** Runs in the same transaction right after the order row exists (e.g. claiming the quote). Throw to roll everything back. */
+  afterCreate?: (tx: Prisma.TransactionClient, order: { id: string; number: string; total: number }) => Promise<void>;
+}
+
+export interface CreateOrderOptions {
+  idempotency?: IdempotencyClaim;
+  customerId?: string | null;
+  /** Wholesale orders only (M6): negotiated prices, bulk quantities, linked business account. */
+  wholesale?: WholesaleHooks;
+}
+
+/** Retail lines are capped at 50 units; wholesale buyers order in bulk. */
+const RETAIL_LINE_CAP = 50;
+const WHOLESALE_LINE_CAP = 100_000;
+
+export async function createOrder(input: OrderInput, opts: CreateOrderOptions = {}) {
   // merge duplicate lines
   const qty = new Map<string, number>();
-  for (const i of input.items) qty.set(i.variantId, Math.min(50, (qty.get(i.variantId) ?? 0) + i.quantity));
+  const cap = opts.wholesale ? WHOLESALE_LINE_CAP : RETAIL_LINE_CAP;
+  for (const i of input.items) qty.set(i.variantId, Math.min(cap, (qty.get(i.variantId) ?? 0) + i.quantity));
 
   const isOnline = input.paymentMethod === "razorpay";
   // Mode and provider come from trusted server configuration; the request body has no say in either.
@@ -65,7 +92,7 @@ export async function createOrder(input: OrderInput, opts: { idempotency?: Idemp
 
   for (let attempt = 1; ; attempt++) {
     try {
-      return await db.$transaction((tx) => insertOrder(tx, input, qty, paymentMode, provider?.id ?? null, opts.idempotency, opts.customerId ?? null), { maxWait: 5_000, timeout: 15_000 });
+      return await db.$transaction((tx) => insertOrder(tx, input, qty, paymentMode, provider?.id ?? null, opts.idempotency, opts.customerId ?? null, opts.wholesale), { maxWait: 5_000, timeout: 15_000 });
     } catch (e) {
       if (opts.idempotency && isUniqueViolationOn(e, "keyHash")) throw new IdempotencyConflictError();
       if (isUniqueViolationOn(e, "number") && attempt < MAX_ORDER_NUMBER_ATTEMPTS) continue; // fresh number, whole transaction retried
@@ -83,6 +110,7 @@ async function insertOrder(
   providerId: "mock" | "razorpay" | "request_only" | null,
   claim: IdempotencyClaim | undefined,
   customerId: string | null,
+  wholesale?: WholesaleHooks,
 ) {
   if (claim) {
     const now = new Date();
@@ -99,21 +127,26 @@ async function insertOrder(
   const unavailable = variants.filter((v) => !v.product.active || (!v.trackInventory && !v.inStock));
   if (unavailable.length) throw new OrderError(`${unavailable.map((v) => v.product.name).join(", ")} is currently unavailable.`, 409);
 
+  // Retail: the catalogue price. Wholesale: whatever the buyer's terms resolve to (the hook enforces MOQ and case packs).
+  const wholesalePrices = wholesale ? await wholesale.priceLines(tx, variants.map((v) => ({ variant: { id: v.id, price: v.price, mrp: v.mrp, name: v.product.name, label: v.label }, quantity: qty.get(v.id)! }))) : null;
   const items = variants.map((v) => {
     const quantity = qty.get(v.id)!;
+    const unitPrice = wholesalePrices ? wholesalePrices.get(v.id) : v.price;
+    if (unitPrice === undefined || !Number.isInteger(unitPrice) || unitPrice <= 0) throw new OrderError("This item cannot be priced right now.", 409);
     return {
       variantId: v.id,
       productName: v.product.name,
       variantLabel: v.label,
       sku: v.sku,
-      unitPrice: v.price,
+      unitPrice,
       quantity,
-      lineTotal: v.price * quantity,
+      lineTotal: unitPrice * quantity,
     };
   });
   const subtotal = items.reduce((s, i) => s + i.lineTotal, 0);
-  const deliveryFee = site.delivery.fee;
+  const deliveryFee = wholesale?.deliveryFee ?? site.delivery.fee;
   const total = subtotal + deliveryFee;
+  if (wholesale?.beforeCreate) await wholesale.beforeCreate(tx, { subtotal, total });
 
   const isOnline = input.paymentMethod === "razorpay";
   const number = orderNumber();
@@ -137,6 +170,7 @@ async function insertOrder(
       paymentStatus: "unpaid",
       paymentMode,
       customerId,
+      businessAccountId: wholesale?.businessAccountId ?? null,
       customerName: input.customerName,
       email: input.email,
       phone: input.phone,
@@ -155,6 +189,7 @@ async function insertOrder(
     include: { items: true, payments: true },
   });
   if (claim) await tx.idempotencyKey.update({ where: { keyHash: claim.keyHash }, data: { orderId: order.id } });
+  if (wholesale?.afterCreate) await wholesale.afterCreate(tx, { id: order.id, number: order.number, total: order.total });
 
   // Hold stock for tracked variants. A line that cannot be held aborts (and rolls back) the whole order.
   const tracked = variants.filter((v) => v.trackInventory);

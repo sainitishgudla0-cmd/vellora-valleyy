@@ -154,6 +154,15 @@ async function main() {
   check("sign-in code verify with a wrong code → 401", (await req("/api/account/otp/verify", { method: "POST", json: { email: "smoke.account@example.com", code: "000000" } })).status === 401);
   check("sign-in rejects bad input → 422", (await req("/api/account/otp/request", { method: "POST", json: { email: "nope" } })).status === 422);
 
+  console.log("\nWholesale");
+  check("business price list without a session → 401", (await req("/api/business/price-list")).status === 401);
+  check("business apply without a session → 401", (await req("/api/business/apply", { method: "POST", json: { companyName: "X" } })).status === 401);
+  check("business quotes without a session → 401", (await req("/api/business/quotes")).status === 401);
+  check("admin wholesale accounts without a session → 401", (await req("/api/admin/wholesale/accounts")).status === 401);
+  check("admin quotes without a session → 401", (await req("/api/admin/quotes")).status === 401);
+  const retailCart = await req("/api/cart/validate", { method: "POST", json: { variantIds: [v1.id] } });
+  check("retail cart validate has no wholesale fields", retailCart.status === 200 && Object.keys(retailCart.body.variants[0]).sort().join() === "available,id,mrp,price");
+
   console.log("\nPages");
   for (const p of ["/", "/shop", "/shop?category=dates", "/product/safawi-dates", "/cart", "/checkout", "/our-story", "/quality", "/contact", "/business", "/admin"]) {
     const r = await req(p);

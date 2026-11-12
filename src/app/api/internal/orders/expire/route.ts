@@ -2,6 +2,7 @@ import { fail, json } from "@/lib/api";
 import { safeEqual } from "@/lib/payment-verification";
 import { safePaymentConfig } from "@/lib/payments";
 import { expireUnpaidOrders } from "@/lib/orders/expire";
+import { expireQuotes } from "@/lib/wholesale/quotes";
 
 export const dynamic = "force-dynamic";
 
@@ -20,5 +21,6 @@ export async function GET(req: Request) {
   const config = safePaymentConfig();
   if (!config) return fail("Payments are misconfigured", 503);
   const minutes = Number(process.env.PAYMENT_WINDOW_MINUTES);
-  return json({ ok: true, ...(await expireUnpaidOrders(config, { windowMinutes: Number.isFinite(minutes) && minutes > 0 ? minutes : undefined })) });
+  const orders = await expireUnpaidOrders(config, { windowMinutes: Number.isFinite(minutes) && minutes > 0 ? minutes : undefined });
+  return json({ ok: true, ...orders, quotesExpired: await expireQuotes() });
 }

@@ -207,7 +207,7 @@ describe("GET /api/internal/orders/expire", () => {
     const res = await call(`Bearer ${CRON}`);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(Object.keys(body).sort()).toEqual(["checked", "errors", "expired", "keysDeleted", "ok", "paid", "pending", "skipped"]);
+    expect(Object.keys(body).sort()).toEqual(["checked", "errors", "expired", "keysDeleted", "ok", "paid", "pending", "quotesExpired", "skipped"]);
     expect(body.expired).toBeGreaterThanOrEqual(1);
     expect((await load(order.id)).status).toBe("cancelled");
   });

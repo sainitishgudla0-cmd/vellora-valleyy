@@ -25,12 +25,13 @@ const orderWhere = (customerId: string, email: string) => ({ OR: [{ customerId }
 export async function exportCustomerData(customerId: string) {
   const customer = await db.customer.findUnique({ where: { id: customerId } });
   if (!customer) return null;
-  const [addresses, consents, orders, enquiries, subscriber] = await Promise.all([
+  const [addresses, consents, orders, enquiries, subscriber, business] = await Promise.all([
     db.address.findMany({ where: { customerId }, orderBy: { createdAt: "asc" } }),
     db.consentRecord.findMany({ where: { customerId }, orderBy: { createdAt: "asc" } }),
     db.order.findMany({ where: orderWhere(customerId, customer.email), orderBy: { createdAt: "asc" }, include: { items: true } }),
     db.enquiry.findMany({ where: { email: { equals: customer.email, mode: "insensitive" } }, orderBy: { createdAt: "asc" } }),
     db.subscriber.findFirst({ where: { email: { equals: customer.email, mode: "insensitive" } } }),
+    db.businessAccount.findFirst({ where: { OR: [{ customerId }, { customerId: null, contactEmail: customer.email }] }, include: { quotes: { include: { items: true }, orderBy: { createdAt: "asc" } } } }),
   ]);
   return {
     exportedAt: new Date().toISOString(),
@@ -55,16 +56,20 @@ export async function exportCustomerData(customerId: string) {
       items: o.items.map((i) => ({ productName: i.productName, variantLabel: i.variantLabel, sku: i.sku, unitPrice: i.unitPrice, quantity: i.quantity, lineTotal: i.lineTotal })),
     })),
     enquiries: enquiries.map((e) => ({ type: e.type, name: e.name, email: e.email, phone: e.phone, company: e.company, city: e.city, interest: e.interest, message: e.message, at: e.createdAt })),
+    businessAccount: business ? { status: business.status, companyName: business.companyName, gstin: business.gstin, contactName: business.contactName, phone: business.phone, paymentTerms: business.paymentTerms, createdAt: business.createdAt, quotes: business.quotes.map((q) => ({ number: q.number, status: q.status, total: q.total, requestedAt: q.createdAt, items: q.items.map((i) => ({ productName: i.productName, variantLabel: i.variantLabel, quantity: i.quantity, unitPrice: i.unitPrice })) })) } : null,
     newsletter: subscriber ? { subscribed: true, since: subscriber.createdAt } : { subscribed: false },
   };
 }
 
-export type EraseResult = { ok: true; ordersAnonymised: number } | { ok: false; code: "open_orders" | "not_found"; message: string; openOrders?: number };
+export type EraseResult = { ok: true; ordersAnonymised: number } | { ok: false; code: "open_orders" | "not_found" | "business_account"; message: string; openOrders?: number };
 
 export async function eraseCustomer(customerId: string): Promise<EraseResult> {
   return db.$transaction(async (tx) => {
     const customer = await tx.customer.findUnique({ where: { id: customerId }, select: { email: true } });
     if (!customer) return { ok: false as const, code: "not_found" as const, message: "Account not found" };
+    // A live business account (pending, approved or suspended) must be closed by staff first: it has quotes, terms and credit attached.
+    const biz = await tx.businessAccount.findFirst({ where: { OR: [{ customerId }, { customerId: null, contactEmail: customer.email }] }, select: { id: true, status: true } });
+    if (biz && (biz.status === "pending" || biz.status === "approved" || biz.status === "suspended")) return { ok: false as const, code: "business_account" as const, message: "Your business account must be closed before your account can be deleted. Please contact us." };
     const where = orderWhere(customerId, customer.email);
     const open = await tx.order.count({ where: { ...where, status: { in: [...OPEN_ORDER_STATUSES] } } });
     if (open > 0) return { ok: false as const, code: "open_orders" as const, message: "You still have orders in progress. Your account can be deleted once they are delivered or cancelled.", openOrders: open };
@@ -78,6 +83,8 @@ export async function eraseCustomer(customerId: string): Promise<EraseResult> {
         data: { customerId: null, customerName: "Erased customer", email: ERASED_EMAIL, phone: "0000000000", addressLine1: "Erased", addressLine2: null, city: "Erased", pincode: "000000", notes: null, accessToken: crypto.randomBytes(18).toString("base64url") },
       });
     }
+    // A closed or rejected business account keeps its company identity (name, GSTIN) but loses the person
+    if (biz) await tx.businessAccount.update({ where: { id: biz.id }, data: { customerId: null, contactName: "Erased", contactEmail: ERASED_EMAIL, phone: "0000000000", message: null, adminNote: null } });
     await tx.idempotencyKey.deleteMany({ where: { orderId: { in: ids } } }); // stored replay bodies contain order tokens
     await tx.enquiry.updateMany({ where: { email: { equals: customer.email, mode: "insensitive" } }, data: { name: "Erased", email: ERASED_EMAIL, phone: null, company: null, city: null, message: "[removed at the customer's request]" } });
     await tx.subscriber.deleteMany({ where: { email: { equals: customer.email, mode: "insensitive" } } });

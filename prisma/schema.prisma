@@ -36,30 +36,33 @@ model Product {
 }
 
 model Variant {
-  id             String              @id @default(cuid())
-  sku            String              @unique // product barcode
-  label          String // e.g. "250g", "10 pieces (400g)"
-  weightGrams    Int
+  id               String              @id @default(cuid())
+  sku              String              @unique // product barcode
+  label            String // e.g. "250g", "10 pieces (400g)"
+  weightGrams      Int
   /// selling price in paise
-  price          Int
+  price            Int
   /// brochure MRP in paise
-  mrp            Int
-  shelfLife      String
-  hsCode         String
-  image          String?
+  mrp              Int
+  shelfLife        String
+  hsCode           String
+  image            String?
   /// Manual availability flag. Only authoritative while `trackInventory` is false; tracked variants derive availability from counts (src/lib/inventory).
-  inStock        Boolean             @default(true)
+  inStock          Boolean             @default(true)
   /// true = per-unit counts are authoritative (M3, ADR 0011). false = legacy manual `inStock` flag; stock and reserved are then always 0.
-  trackInventory Boolean             @default(false)
+  trackInventory   Boolean             @default(false)
   /// Physical units on hand. Changed only by src/lib/inventory (DB CHECK: >= 0).
-  stockQuantity  Int                 @default(0)
+  stockQuantity    Int                 @default(0)
   /// Units held for open orders (reserved <= stockQuantity, DB CHECK). Changed only by src/lib/inventory.
-  reserved       Int                 @default(0)
-  sortOrder      Int                 @default(0)
-  product        Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
-  productId      String
-  orderItems     OrderItem[]
-  movements      InventoryMovement[]
+  reserved         Int                 @default(0)
+  sortOrder        Int                 @default(0)
+  product          Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId        String
+  orderItems       OrderItem[]
+  movements        InventoryMovement[]
+  PriceListItem    PriceListItem[]
+  VariantWholesale VariantWholesale[]
+  QuoteItem        QuoteItem[]
 }
 
 /// What an inventory ledger row did (ADR 0011). Pairings are enforced by a DB CHECK.
@@ -168,11 +171,16 @@ model Order {
   /// Set only server-side, from a signed-in customer's session or an explicit claim (M5). SetNull keeps the order if the account is erased.
   customerId         String?
   customer           Customer?           @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  /// Set only for wholesale orders (M6), placed through /api/business/* or by accepting a quote.
+  businessAccountId  String?
+  businessAccount    BusinessAccount?    @relation(fields: [businessAccountId], references: [id], onDelete: SetNull)
+  quote              Quote?
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
 
   @@index([status, createdAt])
   @@index([customerId, createdAt])
+  @@index([businessAccountId, createdAt])
 }
 
 /// Which integration handled a payment attempt (src/lib/payments/providers).
@@ -364,6 +372,7 @@ model Customer {
   addresses        Address[]
   consents         ConsentRecord[]
   orders           Order[]
+  businessAccount  BusinessAccount?
 }
 
 /// Server-side customer session; only a keyed hash of the cookie token is stored (same scheme as AdminSession).
@@ -427,4 +436,153 @@ model ConsentRecord {
   createdAt  DateTime @default(now())
 
   @@index([customerId, createdAt])
+}
+
+/// Wholesale (M6, ADR 0014).
+enum BusinessAccountStatus {
+  pending
+  approved
+  rejected
+  suspended
+  closed
+}
+
+enum PaymentTerms {
+  prepaid
+  credit
+}
+
+enum QuoteStatus {
+  requested
+  quoted
+  accepted
+  declined
+  expired
+  rejected
+  cancelled
+}
+
+/// A named set of wholesale prices (quantity tiers per variant). Accounts point at one; without one they pay the retail price.
+model PriceList {
+  id          String            @id @default(cuid())
+  name        String            @unique
+  description String?
+  active      Boolean           @default(true)
+  items       PriceListItem[]
+  accounts    BusinessAccount[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+}
+
+/// Price per unit (integer paise) from `minQty` units upward; the row with the highest minQty <= quantity applies.
+model PriceListItem {
+  id          String    @id @default(cuid())
+  priceListId String
+  priceList   PriceList @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+  variantId   String
+  variant     Variant   @relation(fields: [variantId], references: [id])
+  minQty      Int       @default(1)
+  unitPrice   Int
+
+  @@unique([priceListId, variantId, minQty])
+  @@index([variantId])
+}
+
+/// Minimum order quantity and case pack for wholesale buyers. No row = no restriction. Retail is never affected.
+model VariantWholesale {
+  variantId String   @id
+  variant   Variant  @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  moq       Int      @default(1)
+  casePack  Int      @default(1)
+  updatedAt DateTime @updatedAt
+}
+
+/// A business buyer. Linked to a verified customer (M5 sign-in) by `customerId`, or by `contactEmail` until that person signs in.
+model BusinessAccount {
+  id           String                @id @default(cuid())
+  customerId   String?               @unique
+  customer     Customer?             @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  /// lower-cased; the verified owner of this address is linked on first sign-in
+  contactEmail String
+  companyName  String
+  gstin        String
+  contactName  String
+  phone        String
+  /// one of BUSINESS_INTERESTS
+  interest     String?
+  message      String?
+  status       BusinessAccountStatus @default(pending)
+  priceListId  String?
+  priceList    PriceList?            @relation(fields: [priceListId], references: [id], onDelete: SetNull)
+  paymentTerms PaymentTerms          @default(prepaid)
+  /// paise; only meaningful for `credit` terms
+  creditLimit  Int                   @default(0)
+  adminNote    String?
+  approvedAt   DateTime?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  orders       Order[]
+  quotes       Quote[]
+
+  @@index([contactEmail])
+  @@index([status, createdAt])
+}
+
+model Quote {
+  id                String          @id @default(cuid())
+  number            String          @unique
+  businessAccountId String
+  businessAccount   BusinessAccount @relation(fields: [businessAccountId], references: [id])
+  status            QuoteStatus     @default(requested)
+  requestNote       String?
+  /// shown to the buyer with the quote (terms, delivery remarks); internal notes belong on the account
+  buyerNote         String?
+  /// set when quoted (paise)
+  deliveryFee       Int?
+  subtotal          Int?
+  total             Int?
+  validUntil        DateTime?
+  quotedAt          DateTime?
+  decidedAt         DateTime?
+  /// the order created when the quote was accepted
+  orderId           String?         @unique
+  order             Order?          @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  items             QuoteItem[]
+  events            QuoteEvent[]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([businessAccountId, createdAt])
+  @@index([status, validUntil])
+}
+
+model QuoteItem {
+  id           String  @id @default(cuid())
+  quoteId      String
+  quote        Quote   @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  variantId    String
+  variant      Variant @relation(fields: [variantId], references: [id])
+  productName  String
+  variantLabel String
+  sku          String
+  quantity     Int
+  /// set when quoted
+  unitPrice    Int?
+  lineTotal    Int?
+
+  @@unique([quoteId, variantId])
+}
+
+/// Append-only quote history (who moved it where). Written only by src/lib/wholesale/quote-machine.ts.
+model QuoteEvent {
+  id         String         @id @default(cuid())
+  quoteId    String
+  quote      Quote          @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  fromStatus QuoteStatus
+  toStatus   QuoteStatus
+  actorType  OrderActorType
+  actorId    String?
+  createdAt  DateTime       @default(now())
+
+  @@index([quoteId, createdAt])
 }

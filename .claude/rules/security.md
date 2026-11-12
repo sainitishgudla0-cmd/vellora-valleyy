@@ -15,3 +15,4 @@ paths:
 - New dependencies: exact versions only, justified in the commit message and PROGRESS, and `npm audit --omit=dev` must stay clean.
 - Environment checks fail closed: if the environment or target can't be identified, refuse.
 - Customer routes (`/api/account/*`) call `requireCustomer(req)`; the customer id comes only from the session, ownership is part of the query (`where { id, customerId }`), schemas are strict, and nothing returns another customer's data (404 for both missing and not-yours).
+- Wholesale (`/api/business/*`) calls `requireBusiness(req)`; wholesale prices, MOQ and price lists never appear in retail routes or `src/lib/catalog.ts` (ratchet test); account and quote ids come from the session, and another account's data is a 404.
