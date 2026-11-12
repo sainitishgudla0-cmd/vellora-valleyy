@@ -3,7 +3,7 @@
 _Read this first in a new session. Keep it under ~80 lines. Scope and AC per task: `BACKEND-ROADMAP.md`._
 
 ## Current
-- **Milestone:** M2 complete and integrated. **M3 (inventory, expiry, idempotency; T1..T6) implemented on `backend/m3-inventory`**, awaiting CI then fast-forward; M4 needs approval.
+- **Milestone:** M2 complete and integrated. **M3 (inventory, expiry, idempotency; T1..T6) complete and integrated**; M4 needs approval.
 - **Branch:** M1 is integrated: `backend/development` fast-forwarded from `backend/m2-payments` after each task (no PR workflow); see the M2-T6 entry for the latest SHA and CI run. `main` = `55aa848`, untouched. Working copy moved to `~/Developer/Velora-Valley` (the Desktop copy is iCloud-synced and spawns duplicate files). `main` = `55aa848`, untouched.
 - **Last verified:** 2026-11-11, `npm run verify:full` on throwaway Postgres 16 (127.0.0.1): all gates green. See the M1 evidence below.
 
@@ -27,6 +27,7 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 - Migration `20261113090000_inventory_and_idempotency` (additive; CHECKs hand-added). No frontend file changed: the unchanged dashboard still works (price edits on tracked variants; `inStock` ignored for them).
 - Tests: `integration/{inventory,order-idempotency,order-expiry,admin-inventory}` (80 new), `unit/{inventory,idempotency,inventory-ratchet}`; parallel last-unit test x20 inside the suite and the suites run 5 more times green; every file asserts ledger drift is empty. Mutation checks: removing the state-machine hook or the availability guard fails the suites.
 - **Evidence (2026-11-13, Node 24.22.3, throwaway Postgres 16.13, fresh DB):** `verify:full` + `VERIFY_UI=1` -> typecheck ok, unit 248/248, env ok, migrate deploy ok, schema diff none, integration 211/211, build ok, smoke 41/0, UI 51/0; `npm audit --omit=dev` 0.
+- CI on `backend/m3-inventory` @ `aead591`: green (run 43169872270, Node 24, both jobs). Code commit `aead591`.
 - Open: storefront does not send `Idempotency-Key` and the dashboard has no stock UI (frontend approval needed); unpaid COD orders hold stock until staff act; late payment after expiry needs a refund (M10); backorders / wholesale allocations not modelled; add the cron once the Vercel plan is confirmed.
 ### M2-T6 — admin order/payment changes through the state machine (ADR 0010)
 - `PATCH /api/admin/orders/[id]` → `updateOrderAsAdmin` → `transitionOrder` (actor admin): invalid transitions 409, reason/reference 422, admin can never set an order `paid`. Manual payment confirmation only for request-only orders (payment-only, reason + external reference stored on `Payment.manualReference` (unique) and the event); `paid → refunded` bookkeeping with reason; gateway/mock/legacy payments not editable. Payment row + order + event in one transaction. State machine: admin may confirm a payment only with a valid reference, payment-only. Additive migration `manual_payment_confirmation`. Direct-writer ratchet legacy list is now empty. No frontend change (dropdown unchanged; no UI yet for entering a reference — needs approval).
