@@ -1,18 +1,33 @@
 import "server-only";
 import crypto from "node:crypto";
+import { PaymentConfigError, resolvePaymentConfig, type PaymentConfig } from "./env/payment-config";
 
 /**
- * Razorpay integration (optional). Online payment is only offered when BOTH
- * RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are configured. Nothing here ever
- * marks an order paid without a verified Razorpay signature.
+ * Razorpay integration (optional). Online payment is only offered when PAYMENT_MODE is
+ * razorpay_test / razorpay_live AND the configuration passes validation (src/lib/env/payment-config.ts).
+ * An invalid configuration fails closed: online payments are disabled and the error is logged.
+ * Nothing here ever marks an order paid without a verified Razorpay signature.
  */
-export function razorpayConfig() {
-  const keyId = process.env.RAZORPAY_KEY_ID?.trim();
-  const keySecret = process.env.RAZORPAY_KEY_SECRET?.trim();
-  return keyId && keySecret ? { keyId, keySecret } : null;
+let lastLoggedError = "";
+
+export function safePaymentConfig(): PaymentConfig | null {
+  try {
+    return resolvePaymentConfig();
+  } catch (e) {
+    const msg = e instanceof PaymentConfigError ? e.message : String(e);
+    if (msg !== lastLoggedError) {
+      lastLoggedError = msg;
+      console.error(`[payments] ${msg} Online payments are disabled.`);
+    }
+    return null;
+  }
 }
 
-export const onlinePaymentsEnabled = () => razorpayConfig() !== null;
+export function razorpayConfig() {
+  return safePaymentConfig()?.razorpay ?? null;
+}
+
+export const onlinePaymentsEnabled = () => safePaymentConfig()?.onlinePayments === true;
 
 export async function createRazorpayOrder(amountPaise: number, receipt: string) {
   const cfg = razorpayConfig();

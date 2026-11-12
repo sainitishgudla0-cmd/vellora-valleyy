@@ -1,0 +1,72 @@
+import { describe, expect, it } from "vitest";
+import { PaymentConfigError, resolvePaymentConfig } from "@/lib/env/payment-config";
+
+const TEST_KEYS = { RAZORPAY_KEY_ID: "rzp_test_abc123", RAZORPAY_KEY_SECRET: "test_secret" };
+const LIVE_KEYS = { RAZORPAY_KEY_ID: "rzp_live_abc123", RAZORPAY_KEY_SECRET: "live_secret" };
+
+const issuesOf = (env: Record<string, string>) => {
+  try {
+    resolvePaymentConfig(env);
+  } catch (e) {
+    if (e instanceof PaymentConfigError) return e.issues.join(" ");
+    throw e;
+  }
+  throw new Error("expected PaymentConfigError");
+};
+
+describe("resolvePaymentConfig — permitted combinations", () => {
+  it("defaults to request_only with online payments off", () => {
+    const c = resolvePaymentConfig({ VERCEL_ENV: "production" });
+    expect(c).toMatchObject({ mode: "request_only", appEnv: "production", onlinePayments: false, razorpay: null, warnings: [] });
+  });
+
+  it("ignores Razorpay keys (with a warning) when PAYMENT_MODE is unset — keeps current safe checkout", () => {
+    const c = resolvePaymentConfig({ VERCEL_ENV: "production", ...LIVE_KEYS });
+    expect(c.onlinePayments).toBe(false);
+    expect(c.razorpay).toBeNull();
+    expect(c.warnings[0]).toMatch(/ignored/);
+  });
+
+  it.each(["development", "test", "preview", "production"])("request_only is allowed in %s", (appEnv) => {
+    const env = appEnv === "preview" || appEnv === "production" ? { VERCEL_ENV: appEnv } : { APP_ENV: appEnv };
+    expect(resolvePaymentConfig({ ...env, PAYMENT_MODE: "request_only" }).onlinePayments).toBe(false);
+  });
+
+  it.each(["development", "test"])("mock is allowed in %s and never enables a gateway", (appEnv) => {
+    const c = resolvePaymentConfig({ APP_ENV: appEnv, PAYMENT_MODE: "mock", ...TEST_KEYS });
+    expect(c).toMatchObject({ mode: "mock", onlinePayments: false, razorpay: null });
+  });
+
+  it("razorpay_test with test keys is allowed in development and preview", () => {
+    expect(resolvePaymentConfig({ APP_ENV: "development", PAYMENT_MODE: "razorpay_test", ...TEST_KEYS }).razorpay).toEqual({
+      keyId: "rzp_test_abc123",
+      keySecret: "test_secret",
+    });
+    expect(resolvePaymentConfig({ VERCEL_ENV: "preview", PAYMENT_MODE: "razorpay_test", ...TEST_KEYS }).onlinePayments).toBe(true);
+  });
+
+  it("razorpay_live is allowed only in production with live keys and the explicit launch switch", () => {
+    const c = resolvePaymentConfig({ VERCEL_ENV: "production", PAYMENT_MODE: "razorpay_live", RAZORPAY_LIVE_ENABLED: "true", ...LIVE_KEYS });
+    expect(c).toMatchObject({ mode: "razorpay_live", onlinePayments: true });
+  });
+});
+
+describe("resolvePaymentConfig — rejected combinations", () => {
+  it.each([
+    ["mock in production", { VERCEL_ENV: "production", PAYMENT_MODE: "mock" }, /mock is not allowed/],
+    ["mock in preview", { VERCEL_ENV: "preview", PAYMENT_MODE: "mock" }, /mock is not allowed/],
+    ["mock in an unlabelled production build", { NODE_ENV: "production", PAYMENT_MODE: "mock" }, /mock is not allowed/],
+    ["razorpay_test in production", { VERCEL_ENV: "production", PAYMENT_MODE: "razorpay_test", ...TEST_KEYS }, /razorpay_test is not allowed/],
+    ["razorpay_test without keys", { APP_ENV: "development", PAYMENT_MODE: "razorpay_test" }, /requires RAZORPAY_KEY_ID/],
+    ["razorpay_test with live keys", { APP_ENV: "development", PAYMENT_MODE: "razorpay_test", ...LIVE_KEYS }, /Live Razorpay keys must never/],
+    ["razorpay_live in preview", { VERCEL_ENV: "preview", PAYMENT_MODE: "razorpay_live", RAZORPAY_LIVE_ENABLED: "true", ...LIVE_KEYS }, /razorpay_live is not allowed/],
+    ["razorpay_live in development", { APP_ENV: "development", PAYMENT_MODE: "razorpay_live", RAZORPAY_LIVE_ENABLED: "true", ...LIVE_KEYS }, /Live Razorpay keys must never/],
+    ["razorpay_live with test keys", { VERCEL_ENV: "production", PAYMENT_MODE: "razorpay_live", RAZORPAY_LIVE_ENABLED: "true", ...TEST_KEYS }, /starting with "rzp_live_"/],
+    ["razorpay_live without the launch switch", { VERCEL_ENV: "production", PAYMENT_MODE: "razorpay_live", ...LIVE_KEYS }, /RAZORPAY_LIVE_ENABLED=true/],
+    ["live keys in development even in request_only", { APP_ENV: "development", PAYMENT_MODE: "request_only", ...LIVE_KEYS }, /Live Razorpay keys must never/],
+    ["unknown mode", { APP_ENV: "development", PAYMENT_MODE: "stripe" }, /not one of/],
+    ["contradictory APP_ENV", { VERCEL_ENV: "production", APP_ENV: "test", PAYMENT_MODE: "mock" }, /contradicts/],
+  ] as const)("%s", (_name, env, pattern) => {
+    expect(issuesOf(env as Record<string, string>)).toMatch(pattern);
+  });
+});

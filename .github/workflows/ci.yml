@@ -1,0 +1,68 @@
+# Reproducible quality gates. Uses only a throwaway Postgres service container:
+# no Vercel, Neon or Razorpay credentials exist in CI and none are needed.
+name: CI
+
+on:
+  push:
+    branches: [main, "backend/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Typecheck, unit tests, env gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test
+      - name: Env gate rejects unsafe production payment config
+        run: |
+          VERCEL_ENV=production npm run -s env:check
+          if VERCEL_ENV=production PAYMENT_MODE=mock npm run -s env:check; then echo "mock accepted in production"; exit 1; fi
+
+  full:
+    name: Migrate, integration, build, API smoke (disposable Postgres)
+    runs-on: ubuntu-latest
+    needs: checks
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: velora
+          POSTGRES_PASSWORD: velora
+          POSTGRES_DB: velora_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U velora" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      APP_ENV: test
+      TEST_TARGET: disposable
+      DATABASE_URL: postgresql://velora:velora@127.0.0.1:5432/velora_ci
+      DATABASE_URL_UNPOOLED: postgresql://velora:velora@127.0.0.1:5432/velora_ci
+      PAYMENT_MODE: request_only
+      # test-only values for the throwaway CI database
+      ADMIN_PASSWORD: ci-admin-password-not-secret
+      SESSION_SECRET: ci-session-secret-not-secret-0123456789
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run verify:full

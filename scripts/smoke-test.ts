@@ -1,9 +1,12 @@
 /**
  * End-to-end API smoke test against a running server.
- *   BASE_URL=http://localhost:3000 ADMIN_PASSWORD=... npm run test:api
- * Creates one test order + enquiries in the database (marked "SMOKE TEST").
+ *   TEST_TARGET=disposable BASE_URL=http://localhost:3000 ADMIN_PASSWORD=... npm run test:api
+ * Creates one test order + enquiries in the database (marked "SMOKE TEST") and temporarily edits a price,
+ * so it refuses to run unless the server confirms its database is disposable (scripts/lib/safety.ts).
  */
-const BASE = process.env.BASE_URL ?? "http://localhost:3000";
+import { assertServerIsDisposable } from "./lib/safety";
+
+const BASE = (process.env.BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
 let passed = 0;
 let failed = 0;
 
@@ -47,7 +50,8 @@ const customer = {
 };
 
 async function main() {
-  console.log(`Smoke testing ${BASE}\n`);
+  await assertServerIsDisposable(BASE);
+  console.log(`Smoke testing ${BASE} (disposable environment confirmed)\n`);
 
   console.log("Catalogue");
   const all = await req("/api/products");
@@ -81,7 +85,8 @@ async function main() {
   const ghost = await req("/api/orders", { method: "POST", json: { ...customer, paymentMethod: "cod", items: [{ variantId: "does-not-exist", quantity: 1 }] } });
   check("unknown variant rejected (409)", ghost.status === 409);
   const online = await req("/api/orders", { method: "POST", json: { ...customer, paymentMethod: "razorpay", items: [{ variantId: v1.id, quantity: 1 }] } });
-  const onlineConfigured = !!process.env.RAZORPAY_KEY_ID;
+  // online payment is offered only in razorpay_* modes (src/lib/env/payment-config.ts)
+  const onlineConfigured = /^razorpay_/.test(process.env.PAYMENT_MODE ?? "");
   if (!onlineConfigured) check("online payment refused when Razorpay is not configured", online.status === 400, online.body);
 
   console.log("\nOrder (pay on delivery)");

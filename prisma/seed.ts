@@ -3,10 +3,24 @@
  * - New products and variants are created.
  * - Existing products keep their admin-edited prices; descriptive fields are refreshed.
  *   Pass --reset-prices to overwrite selling prices with brochure MRPs.
+ *
+ * Safety: runs only against a disposable database, unless the operator explicitly confirms a production
+ * catalogue sync (APP_ENV=production + CONFIRM_PRODUCTION_DB_HOST=<host>). See docs/RUNBOOK-DATABASE.md.
  */
 import { PrismaClient } from "@prisma/client";
 import { products } from "../src/data/products";
+import { assertDatabaseWriteAllowed } from "../src/lib/env/test-safety";
+import { loadLocalEnv } from "../scripts/lib/safety";
 
+loadLocalEnv();
+let target: ReturnType<typeof assertDatabaseWriteAllowed>;
+try {
+  target = assertDatabaseWriteAllowed(process.env, "catalogue seed");
+} catch (e) {
+  console.error(`[seed] ${e instanceof Error ? e.message : e}`);
+  process.exit(1);
+}
+console.log(`Seeding catalogue into ${target.host}/${target.database}${target.production ? " (PRODUCTION, explicitly confirmed)" : ""}`);
 const db = new PrismaClient();
 const resetPrices = process.argv.includes("--reset-prices");
 

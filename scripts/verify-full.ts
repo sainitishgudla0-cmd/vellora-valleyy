@@ -1,0 +1,83 @@
+/**
+ * Milestone gate: the full pipeline against a DISPOSABLE Postgres (used locally and in CI).
+ *   TEST_TARGET=disposable APP_ENV=test DATABASE_URL=postgresql://...@127.0.0.1:5432/velora_test npm run verify:full
+ *
+ * 1. guard: TEST_TARGET=disposable + disposable database (fails closed)
+ * 2. typecheck, unit tests, env check
+ * 3. prisma migrate deploy -> schema drift check -> catalogue seed
+ * 4. integration tests (real Postgres)
+ * 5. next build -> next start on VERIFY_PORT (default 3100) -> API smoke test -> stop server
+ * Set VERIFY_UI=1 to also run the browser test (needs Chrome; CHROME_PATH).
+ */
+import { spawn, spawnSync } from "node:child_process";
+import { assertDisposableDatabase, assertTestTargetDeclared } from "../src/lib/env/test-safety";
+import { loadLocalEnv } from "./lib/safety";
+
+loadLocalEnv();
+try {
+  assertTestTargetDeclared();
+  const t = assertDisposableDatabase(process.env, "verify:full");
+  console.log(`[verify:full] disposable database: ${t.host}/${t.database}`);
+} catch (e) {
+  console.error(`[verify:full] ${e instanceof Error ? e.message : e}`);
+  process.exit(1);
+}
+
+const PORT = process.env.VERIFY_PORT ?? "3100";
+const BASE = `http://127.0.0.1:${PORT}`;
+const env = { ...process.env, PRISMA_HIDE_UPDATE_MESSAGE: "1" };
+
+function step(name: string, cmd: string, args: string[], extraEnv: Record<string, string> = {}) {
+  console.log(`\n[verify:full] ▶ ${name}`);
+  const r = spawnSync(cmd, args, { stdio: "inherit", env: { ...env, ...extraEnv } });
+  // throw (not exit) so the `finally` below always stops the server
+  if (r.status !== 0) throw new Error(`${name} failed (exit ${r.status})`);
+  console.log(`[verify:full] ✓ ${name}`);
+}
+
+async function waitFor(url: string, ms = 60_000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    try {
+      if ((await fetch(url)).ok) return;
+    } catch {
+      /* not up yet */
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error(`server did not become ready at ${url}`);
+}
+
+async function main() {
+  step("typecheck", "npm", ["run", "-s", "typecheck"]);
+  step("unit tests", "npm", ["run", "-s", "test"]);
+  step("env check", "npm", ["run", "-s", "env:check"]);
+  step("migrate deploy", "npm", ["run", "-s", "db:migrate:deploy"]);
+  step("schema drift check", "npm", ["run", "-s", "db:schema:diff"]);
+  step("seed catalogue", "npm", ["run", "-s", "db:seed"]);
+  step("integration tests", "npm", ["run", "-s", "test:integration"]);
+  step("next build", "npm", ["run", "-s", "build"]);
+
+  console.log(`\n[verify:full] ▶ start server on ${BASE}`);
+  const server = spawn("npx", ["next", "start", "-p", PORT, "-H", "127.0.0.1"], { stdio: ["ignore", "inherit", "inherit"], env, detached: true });
+  const stop = () => {
+    try {
+      process.kill(-server.pid!, "SIGTERM");
+    } catch {
+      /* already gone */
+    }
+  };
+  try {
+    await waitFor(`${BASE}/api/internal/test-environment`);
+    step("API smoke test", "npm", ["run", "-s", "test:api"], { BASE_URL: BASE });
+    if (process.env.VERIFY_UI === "1") step("UI test", "npm", ["run", "-s", "test:ui", "--", BASE]);
+  } finally {
+    stop();
+  }
+  console.log("\n[verify:full] ✓ all gates passed");
+}
+
+main().catch((e) => {
+  console.error(`[verify:full] ✗ ${e instanceof Error ? e.message : e}`);
+  process.exit(1);
+});

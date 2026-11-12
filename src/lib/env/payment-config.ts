@@ -1,0 +1,95 @@
+/**
+ * Payment configuration contract. Pure (no `server-only`) so build scripts can validate it.
+ * Canonical description: docs/DECISIONS/0002-environment-and-payment-modes.md.
+ *
+ *   mode           allowed APP_ENV                    keys
+ *   mock           development, test                  ignored (no online gateway)
+ *   request_only   any                                ignored (order request, payment pending)
+ *   razorpay_test  development, test, preview         rzp_test_* id + secret required
+ *   razorpay_live  production + RAZORPAY_LIVE_ENABLED  rzp_live_* id + secret required
+ *
+ * Live Razorpay keys outside production are always rejected, whatever the mode.
+ * PAYMENT_MODE unset => request_only (configured keys are ignored, with a warning).
+ */
+import { resolveAppEnv, type AppEnv, type EnvSource, EnvSafetyError } from "./app-env";
+
+export const PAYMENT_MODES = ["mock", "request_only", "razorpay_test", "razorpay_live"] as const;
+export type PaymentMode = (typeof PAYMENT_MODES)[number];
+
+export interface PaymentConfig {
+  mode: PaymentMode;
+  appEnv: AppEnv;
+  /** true only when a real gateway checkout may be offered to customers */
+  onlinePayments: boolean;
+  razorpay: { keyId: string; keySecret: string } | null;
+  warnings: string[];
+}
+
+export class PaymentConfigError extends Error {
+  constructor(public issues: string[]) {
+    super(`Invalid payment configuration: ${issues.join(" ")}`);
+    this.name = "PaymentConfigError";
+  }
+}
+
+const ALLOWED_ENVS: Record<PaymentMode, readonly AppEnv[]> = {
+  mock: ["development", "test"],
+  request_only: ["development", "test", "preview", "production"],
+  razorpay_test: ["development", "test", "preview"],
+  razorpay_live: ["production"],
+};
+
+const isMode = (v: string): v is PaymentMode => (PAYMENT_MODES as readonly string[]).includes(v);
+
+export function resolvePaymentConfig(env: EnvSource = process.env): PaymentConfig {
+  let appEnv: AppEnv;
+  try {
+    appEnv = resolveAppEnv(env);
+  } catch (e) {
+    throw new PaymentConfigError([e instanceof EnvSafetyError ? e.message : String(e)]);
+  }
+
+  const issues: string[] = [];
+  const warnings: string[] = [];
+  const keyId = env.RAZORPAY_KEY_ID?.trim() || "";
+  const keySecret = env.RAZORPAY_KEY_SECRET?.trim() || "";
+  const rawMode = env.PAYMENT_MODE?.trim() || "";
+
+  let mode: PaymentMode = "request_only";
+  if (!rawMode) {
+    if (keyId || keySecret) warnings.push("PAYMENT_MODE is not set, so Razorpay keys are ignored and checkout stays request-only.");
+  } else if (isMode(rawMode)) {
+    mode = rawMode;
+  } else {
+    issues.push(`PAYMENT_MODE="${rawMode}" is not one of ${PAYMENT_MODES.join(", ")}.`);
+  }
+
+  if (keyId.startsWith("rzp_live_") && appEnv !== "production") {
+    issues.push(`Live Razorpay keys must never be configured outside production (APP_ENV=${appEnv}).`);
+  }
+
+  if (!ALLOWED_ENVS[mode].includes(appEnv)) {
+    issues.push(`PAYMENT_MODE=${mode} is not allowed when APP_ENV=${appEnv} (allowed: ${ALLOWED_ENVS[mode].join(", ")}).`);
+  }
+
+  if (mode === "razorpay_test" || mode === "razorpay_live") {
+    const prefix = mode === "razorpay_test" ? "rzp_test_" : "rzp_live_";
+    if (!keyId || !keySecret) issues.push(`PAYMENT_MODE=${mode} requires RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.`);
+    else if (!keyId.startsWith(prefix)) issues.push(`PAYMENT_MODE=${mode} requires a RAZORPAY_KEY_ID starting with "${prefix}".`);
+  }
+
+  if (mode === "razorpay_live" && env.RAZORPAY_LIVE_ENABLED?.trim() !== "true") {
+    issues.push("PAYMENT_MODE=razorpay_live also requires RAZORPAY_LIVE_ENABLED=true (explicit launch switch).");
+  }
+
+  if (issues.length) throw new PaymentConfigError(issues);
+
+  const online = mode === "razorpay_test" || mode === "razorpay_live";
+  return {
+    mode,
+    appEnv,
+    onlinePayments: online,
+    razorpay: online ? { keyId, keySecret } : null,
+    warnings,
+  };
+}

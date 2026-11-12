@@ -1,10 +1,13 @@
 // UI end-to-end checks for Velora Valley (drives a real Chrome).
-// usage: npm run test:ui -- http://localhost:3000 ./screenshots
+// usage: TEST_TARGET=disposable npm run test:ui -- http://localhost:3000 ./screenshots
 // Set CHROME_PATH if Chrome is not at the default Windows location.
-// Places one test order marked "SMOKE TEST UI" in the database.
+// Places one test order marked "SMOKE TEST UI" in the database, so it refuses to run unless the
+// server confirms its database is disposable (scripts/lib/safety.ts).
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
+import { assertServerIsDisposable } from './lib/safety.ts';
 const [,, BASE='http://localhost:3000', OUT='./.e2e-screenshots'] = process.argv;
+await assertServerIsDisposable(BASE);
 fs.mkdirSync(OUT, { recursive: true });
 const b = await chromium.launch({ executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe' });
 let pass = 0, fail = 0;
