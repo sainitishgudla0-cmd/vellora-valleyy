@@ -4,7 +4,7 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 
 ## Current
 - **Milestone:** M2 in progress on `backend/m2-payments`. M2-T1..T5 done. T6 needs approval.
-- **Branch:** M1 is integrated: `backend/development` = `0bd8610` (M2-T4 integrated by fast-forward, no PR workflow). CI green (run 43149083744). Working copy moved to `~/Developer/Velora-Valley` (the Desktop copy is iCloud-synced and spawns duplicate files). `main` = `55aa848`, untouched.
+- **Branch:** M1 is integrated: `backend/development` = see the M2-T5 entry below (fast-forwarded from `backend/m2-payments`; no PR workflow). Working copy moved to `~/Developer/Velora-Valley` (the Desktop copy is iCloud-synced and spawns duplicate files). `main` = `55aa848`, untouched.
 - **Last verified:** 2026-11-11, `npm run verify:full` on throwaway Postgres 16 (127.0.0.1): all gates green. See the M1 evidence below.
 
 ## Next up
@@ -27,6 +27,7 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 - Recovery: `reconcile.ts` + `npm run payments:reconcile` (guarded). Dev runner `npm run payments:mock-checkout` (real API, key only in its own process). `MOCK_PAYMENT_CONFIRM_KEY` rejected in preview/production. Additive migration `payment_reconciliation`. `scripts/e2e-ui.mjs` made Node-24-safe (dynamic import).
 - Tests: 5 new/rewritten integration files (`checkout-flows`, `razorpay-verify` 30, `reconcile` 7, plus updated mock/state-machine) with `tests/support/fake-razorpay.ts` (throws on any non-Razorpay host); unit: gateway adapter, config, ratchet rewritten to classify status vs non-status writers. Mutation checks: treating `authorized` as captured, or skipping the amount/order match, makes tests fail.
 - **Evidence (2026-11-12, Node 24.22.3, throwaway Postgres 16.13, fresh DB):** `verify:full` + `VERIFY_UI=1` → typecheck ✓ · unit 219/219 ✓ · env ✓ · migrate deploy ✓ · schema diff none ✓ · integration 122/122 ✓ · build ✓ · smoke 41/0 ✓ · UI 51/0 ✓; `npm audit --omit=dev` 0. Dev runner exercised against a local `next start` (mock mode): order created as mock, confirmed, repeat idempotent; wrong key → 401.
+- CI on `backend/m2-payments` @ `9119d56`: green (run 43155451686, Node 24, both jobs). Code commit `9119d56`.
 - Direct status writers left: admin PATCH only (ratchet). Not centralized until M2-T6.
 - Risks/deferred: M3 (order idempotency keys, stock reservation); M10 (webhooks, refunds; reconciliation is operator-run); in-flight orders at deploy → manual (runbook); Razorpay REST shapes verified against fakes only (confirm the `receipt` list filter in test mode); build still fetches Google Fonts.
 ### M2-T4 — mock payment confirmation + order payment mode (ADR 0008)
