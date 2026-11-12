@@ -93,13 +93,17 @@ async function loadSession(token: string | null, now = new Date()): Promise<Admi
 
 export const sessionFromRequest = (req: Request) => loadSession(tokenFromCookieHeader(req.headers.get("cookie")));
 
-/** For server components (the dashboard page): is there a valid admin session? */
-export async function isAdmin(): Promise<boolean> {
+/** For server components (the dashboard page): the signed-in admin, or null. */
+export async function currentAdmin(): Promise<AdminContext | null> {
   try {
-    return (await loadSession((await cookies()).get(SESSION_COOKIE)?.value ?? null)) !== null;
+    return await loadSession((await cookies()).get(SESSION_COOKIE)?.value ?? null);
   } catch {
-    return false;
+    return null;
   }
+}
+
+export async function isAdmin(): Promise<boolean> {
+  return (await currentAdmin()) !== null;
 }
 
 /**

@@ -70,7 +70,14 @@ async function main() {
   try {
     await waitFor(`${BASE}/api/internal/test-environment`);
     step("API smoke test", "npm", ["run", "-s", "test:api"], { BASE_URL: BASE });
-    if (process.env.VERIFY_UI === "1") step("UI test", "npm", ["run", "-s", "test:ui", "--", BASE]);
+    if (process.env.VERIFY_UI === "1") {
+      // The admin UI test needs an owner account. Created through the same guarded bootstrap script operators use,
+      // against this run's disposable database, with a throwaway password that never leaves this process.
+      const ownerEmail = `smoke.ui-owner-${Date.now()}@example.com`;
+      const ownerPassword = `ui-test-${Math.random().toString(36).slice(2)}-passphrase`;
+      step("UI test owner account", "npm", ["run", "-s", "admin:bootstrap", "--", "--email", ownerEmail, "--name", "UI Test Owner", "--additional-owner"], { ADMIN_BOOTSTRAP_PASSWORD: ownerPassword });
+      step("UI test", "npm", ["run", "-s", "test:ui", "--", BASE], { UI_TEST_ADMIN_EMAIL: ownerEmail, UI_TEST_ADMIN_PASSWORD: ownerPassword });
+    }
   } finally {
     stop();
   }

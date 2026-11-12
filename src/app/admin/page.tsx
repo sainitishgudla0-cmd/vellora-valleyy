@@ -1,17 +1,20 @@
 import type { Metadata } from "next";
 import { db } from "@/lib/db";
-import { adminConfigured, isAdmin } from "@/lib/admin-auth";
+import { adminConfigured } from "@/lib/admin-auth";
+import { currentAdmin, legacyLoginEnabled } from "@/lib/auth/admin";
+import { listSessions, listUsers } from "@/lib/auth/users";
 import { onlinePaymentsEnabled } from "@/lib/payments";
 import { formatPrice } from "@/lib/format";
 import { MOCK_PAYMENT_LABEL } from "@/lib/payments/labels";
 import { BUSINESS_INTERESTS } from "@/lib/validation";
 import { AdminLogin, AdminLogout, EnquiryStatus, OrderStatusSelect, RemoveTestData, VariantEditor } from "@/components/admin/AdminControls";
+import { ChangePasswordForm, SessionsTable, TeamManager } from "@/components/admin/AccountControls";
 import { TEST_ENQUIRY_WHERE, TEST_ORDER_WHERE, TEST_SUBSCRIBER_WHERE } from "@/lib/test-data";
 
 export const metadata: Metadata = { title: "Admin", robots: { index: false, follow: false } };
 export const dynamic = "force-dynamic";
 
-const TABS = ["orders", "enquiries", "products"] as const;
+const BASE_TABS = ["orders", "enquiries", "products", "account"] as const;
 
 export default async function AdminPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const sp = await searchParams;
@@ -19,12 +22,14 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
     return (
       <div className="container-site py-20">
         <h1 className="text-display-sm">Admin not configured</h1>
-        <p className="mt-3 text-[14px]">Set ADMIN_PASSWORD and SESSION_SECRET (24+ characters) in your environment, then restart the server.</p>
+        <p className="mt-3 text-[14px]">Set SESSION_SECRET (24+ characters) in your environment, create the first owner with <code className="rounded bg-dough px-1">npm run admin:bootstrap</code>, then restart the server.</p>
       </div>
     );
-  if (!(await isAdmin())) return <AdminLogin />;
+  const admin = await currentAdmin();
+  if (!admin) return <AdminLogin emailRequired={!legacyLoginEnabled()} />;
 
-  const tab = (TABS as readonly string[]).includes(sp.tab ?? "") ? sp.tab! : "orders";
+  const tabs: readonly string[] = admin.can("users:manage") ? [...BASE_TABS, "team"] : BASE_TABS;
+  const tab = tabs.includes(sp.tab ?? "") ? sp.tab! : "orders";
   const [orders, enquiries, products, subs, newOrders, newEnq, testOrders, testEnq, testSubs] = await Promise.all([
     tab === "orders" ? db.order.findMany({ orderBy: { createdAt: "desc" }, include: { items: true }, take: 100 }) : Promise.resolve([]),
     tab === "enquiries" ? db.enquiry.findMany({ orderBy: { createdAt: "desc" }, take: 200 }) : Promise.resolve([]),
@@ -47,7 +52,10 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           <h1 className="text-display-sm">Dashboard</h1>
         </div>
         <div className="flex items-center gap-5">
-          {testTotal > 0 && <RemoveTestData count={testTotal} />}
+          <span className="text-[12px] text-forest/60" data-testid="admin-identity">
+            {admin.legacy ? "Shared password" : `${admin.label} · ${admin.role}`}
+          </span>
+          {testTotal > 0 && admin.can("testdata:write") && <RemoveTestData count={testTotal} />}
           <AdminLogout />
         </div>
       </div>
@@ -60,7 +68,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
       </div>
 
       <nav className="mt-8 flex gap-2 border-b border-forest/15" aria-label="Admin sections">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <a
             key={t}
             href={`/admin?tab=${t}`}
@@ -213,6 +221,78 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           </div>
         </div>
       )}
+
+      {tab === "account" && <AccountTab admin={admin} />}
+      {tab === "team" && admin.can("users:manage") && <TeamTab currentUserId={admin.userId} />}
+    </div>
+  );
+}
+
+/** Your own sessions and password. The shared-password session has neither. */
+async function AccountTab({ admin }: { admin: NonNullable<Awaited<ReturnType<typeof currentAdmin>>> }) {
+  if (admin.legacy || !admin.userId)
+    return (
+      <div className="mt-6 max-w-[560px] rounded-[12px] bg-sage p-5 text-[13px]">
+        <p className="font-medium">You are signed in with the shared admin password.</p>
+        <p className="mt-2 text-forest/70">It has no personal account, sessions or password to manage. Ask an owner to create your account, then sign in with your email.</p>
+      </div>
+    );
+  const sessions = await listSessions(admin.userId);
+  return (
+    <div className="mt-6 space-y-8">
+      <section>
+        <h2 className="text-[15px] font-medium">Your sessions</h2>
+        <p className="mb-2 text-[12.5px] text-forest/65">Signed in as {admin.label} ({admin.role}). Sessions last 8 hours, or 2 hours if unused. Sign out any you do not recognise.</p>
+        <SessionsTable showWho={false} sessions={sessions.map((x) => ({ id: x.id, who: x.email ?? "", userAgent: x.userAgent, createdAt: x.createdAt.toISOString(), lastSeenAt: x.lastSeenAt.toISOString(), current: x.id === admin.sessionId }))} />
+      </section>
+      <ChangePasswordForm />
+    </div>
+  );
+}
+
+/** Owner only: accounts, everyone's sessions, and the recent audit log. */
+async function TeamTab({ currentUserId }: { currentUserId: string | null }) {
+  const [users, sessions, audit] = await Promise.all([listUsers(), listSessions(), db.auditLog.findMany({ orderBy: { createdAt: "desc" }, take: 40 })]);
+  return (
+    <div className="mt-6 space-y-10">
+      <section>
+        <h2 className="mb-3 text-[15px] font-medium">Team</h2>
+        <TeamManager
+          currentUserId={currentUserId}
+          users={users.map((u) => ({ id: u.id, email: u.email, name: u.name, role: u.role, active: u.active, locked: !!u.lockedUntil && u.lockedUntil > new Date(), lastLoginAt: u.lastLoginAt?.toISOString() ?? null }))}
+        />
+      </section>
+      <section>
+        <h2 className="mb-2 text-[15px] font-medium">Active sessions</h2>
+        <SessionsTable showWho sessions={sessions.map((x) => ({ id: x.id, who: x.legacy ? "Shared password" : (x.email ?? ""), userAgent: x.userAgent, createdAt: x.createdAt.toISOString(), lastSeenAt: x.lastSeenAt.toISOString(), current: false }))} />
+      </section>
+      <section>
+        <h2 className="mb-2 text-[15px] font-medium">Recent activity</h2>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-left text-[12.5px]">
+            <thead className="text-[11px] uppercase tracking-wider text-forest/60">
+              <tr>
+                <th className="py-2 pr-3">When</th>
+                <th className="py-2 pr-3">Who</th>
+                <th className="py-2 pr-3">Action</th>
+                <th className="py-2 pr-3">Result</th>
+                <th className="py-2">Target</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-forest/10">
+              {audit.map((a) => (
+                <tr key={a.id}>
+                  <td className="py-2 pr-3">{a.createdAt.toLocaleString("en-IN")}</td>
+                  <td className="py-2 pr-3">{a.actorLabel}</td>
+                  <td className="py-2 pr-3">{a.action}</td>
+                  <td className="py-2 pr-3">{a.outcome}</td>
+                  <td className="py-2 text-forest/60">{a.targetType ? `${a.targetType} ${a.targetId ?? ""}` : ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }

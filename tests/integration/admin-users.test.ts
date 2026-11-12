@@ -297,6 +297,20 @@ describe("owner bootstrap and recovery script", () => {
     expect(run(["--reset", "--email", `ghost@${FIXTURE_EMAIL_DOMAIN}`], NEW).status).toBe(1);
   }, 120_000);
 
+  it("--additional-owner adds an owner next to an existing one, but only when the database is declared disposable", async () => {
+    await createTestAdmin("owner");
+    const email = `extra-${Date.now()}@${FIXTURE_EMAIL_DOMAIN}`;
+    const PASSWORD = "additional-owner-passphrase-5";
+    const refused = spawnSync("npx", ["tsx", "--conditions=react-server", "scripts/admin-bootstrap.ts", "--email", email, "--name", "Extra", "--additional-owner"], { env: { ...process.env, TEST_TARGET: "", ADMIN_BOOTSTRAP_PASSWORD: PASSWORD }, encoding: "utf8", timeout: 90_000 });
+    expect(refused.status).toBe(1);
+    expect(await db.adminUser.count({ where: { email } })).toBe(0);
+    const plain = run(["--email", email, "--name", "Extra"], PASSWORD); // without the flag an existing owner blocks creation
+    expect(plain.status).toBe(1);
+    const ok = run(["--email", email, "--name", "Extra", "--additional-owner"], PASSWORD);
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(await db.adminUser.findUniqueOrThrow({ where: { email } })).toMatchObject({ role: "owner" });
+  }, 180_000);
+
   it("requires an email, and a password source", () => {
     expect(run(["--name", "x"], "whatever-long-password-1").status).toBe(1);
     expect(run(["--email", `x@${FIXTURE_EMAIL_DOMAIN}`, "--name", "x"]).status).toBe(1); // no env password and no TTY

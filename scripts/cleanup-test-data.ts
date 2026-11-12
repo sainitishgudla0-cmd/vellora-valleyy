@@ -29,7 +29,8 @@ async function main() {
   });
   const enquiries = await db.enquiry.deleteMany({ where: { OR: [{ name: { startsWith: "SMOKE TEST" } }, { email: { startsWith: "smoke." } }] } });
   const subs = await db.subscriber.deleteMany({ where: { email: { startsWith: "smoke." } } });
-  console.log(`Removed ${orders.count} test orders, ${enquiries.count} test enquiries, ${subs.count} test subscribers`);
+  const admins = await db.adminUser.deleteMany({ where: { email: { startsWith: "smoke." } } }); // browser-test accounts (sessions cascade)
+  console.log(`Removed ${orders.count} test orders, ${enquiries.count} test enquiries, ${subs.count} test subscribers, ${admins.count} test admin accounts`);
 }
 
 main().finally(() => db.$disconnect());

@@ -3,7 +3,7 @@
 _Read this first in a new session. Keep it under ~80 lines. Scope and AC per task: `BACKEND-ROADMAP.md`._
 
 ## Current
-- **Milestone:** M1-M3 integrated. **M4 (admin identity, roles, audit; T1-T5) complete and integrated**; T6 (admin UI) needs approval. M5 needs approval.
+- **Milestone:** M1-M3 integrated. **M4 (admin identity, roles, audit; T1-T6) complete; T6 admin UI on `backend/m4-admin-ui`**, awaiting CI then fast-forward. M5 needs approval.
 - **Branch:** M1 is integrated: `backend/development` fast-forwarded from `backend/m2-payments` after each task (no PR workflow); see the M2-T6 entry for the latest SHA and CI run. `main` = `55aa848`, untouched. Working copy moved to `~/Developer/Velora-Valley` (the Desktop copy is iCloud-synced and spawns duplicate files). `main` = `55aa848`, untouched.
 - **Last verified:** 2026-11-11, `npm run verify:full` on throwaway Postgres 16 (127.0.0.1): all gates green. See the M1 evidence below.
 
@@ -11,7 +11,7 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 | Task | Status | Notes |
 |---|---|---|
 | M3 inventory + order idempotency | done on `backend/m3-inventory` (see entry) | ADR 0011 |
-| M4 admin accounts, roles, audit | done (T1-T5; T6 UI not built) | ADR 0012 |
+| M4 admin accounts, roles, audit | done (T1-T6) | ADR 0012 |
 | M5 | proposed (needs approval) | see `BACKEND-ROADMAP.md` |
 
 ## Blockers / open items
@@ -25,11 +25,13 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 ## Done
 ### M4 — admin identity, sessions, roles and audit (`backend/m4-admin-auth`, ADR 0012)
 - T1 `AdminUser` / `AdminSession` / `AuditLog` (migration `20261114090000_admin_auth`, additive). T2 `src/lib/auth/admin.ts`: DB sessions (random token, only its HMAC stored; 8 h absolute, 2 h idle, revocable), `requireAdmin(req, permission)` (401/403), roles `owner|operations|catalog|viewer` via a permission matrix, scrypt passwords, 5-failure/15-minute lockout with one identical 401 for every failure, session replaced on login, logout/deactivation/role/password change revoke at once. T3 same-origin check on every mutation (login/logout included). T4 `npm run admin:bootstrap` (guarded; first owner + owner recovery `--reset`); shared `ADMIN_PASSWORD` kept as a transition login (legacy sessions: owner-level for the dashboard, never `users:manage`; off with `ADMIN_LEGACY_LOGIN=off`). T5 every admin route calls `requireAdmin` and every mutation `writeAudit` (ratchet test); order events/ledger now record the account id. API for accounts, sessions, own password and the audit log. Last active owner is protected (row lock).
-- **Not built:** T6 admin UI (needs approval; the dashboard login form cannot send an email, so the shared password cannot be retired until it does). 2FA deferred.
+- 2FA deferred.
+- **T6 admin UI (approved 2026-11-12, `backend/m4-admin-ui`):** admin files only. Login form gains Email (required once `ADMIN_LEGACY_LOGIN=off`; empty email still signs in with the shared password while it is enabled). Header shows who is signed in. New **Account** tab (own sessions with sign-out, change password) for everyone and **Team** tab for owners (create/disable/enable/unlock/reset password, role select, all sessions, last 40 audit entries). Existing controls unchanged; limits are enforced by the API. Browser test extended (20 admin checks); `verify:full` creates a throwaway owner via `admin:bootstrap --additional-owner` (disposable DBs only).
+- **T6 evidence (2026-11-12, Node 24.22.3, fresh DB):** `verify:full` + `VERIFY_UI=1` -> typecheck ok, unit 289/289, integration 274/274, build ok, smoke 41/0, UI 71/0 (51 + 20 admin); `npm audit` 0. Browser-error summary lists only deliberate 401/403/422 responses.
 - Tests: `integration/{admin-auth,admin-users}` (role x route matrix, lockout, revocation, CSRF, audit completeness without secrets, last-owner race, bootstrap script run as a child process), `unit/{auth-core,admin-routes-ratchet}`; existing admin tests moved from auth mocks to real sessions. Mutation checks: removing the permission check, the lockout or the logout revocation each fails the suites.
 - **Evidence (2026-11-14, Node 24.22.3, throwaway Postgres 16.13, fresh DB):** `verify:full` + `VERIFY_UI=1` -> typecheck ok, unit 289/289, env ok, migrate deploy ok, schema diff none, integration 273/273, build ok, smoke 41/0, UI 51/0; `npm audit --omit=dev` 0. No frontend file changed.
 - CI on `backend/m4-admin-auth` @ `46b1749`: green (run 43177905336, Node 24, both jobs). Code commit `46b1749`.
-- Open: admin UI (T6) and retiring `ADMIN_PASSWORD`; 2FA; run the bootstrap before relying on individual accounts in production; audit log has no retention policy yet.
+- Open: retiring `ADMIN_PASSWORD` (operator step now possible); 2FA; run the bootstrap before relying on individual accounts in production; audit log has no retention policy yet.
 ### M3 — inventory, expiry and order idempotency (`backend/m3-inventory`, ADR 0011)
 - T1 `Variant.trackInventory` (opt-in, default off = legacy manual flag) + `stockQuantity`/`reserved`, append-only `InventoryMovement` ledger, DB CHECKs (no negative stock / over-reservation), derived `inStock` kept in API output (catalog + cart validate). Counters written only by `src/lib/inventory` (ratchet test). T2 `createOrder` is one transaction: guarded `UPDATE ... WHERE stock - reserved >= qty`, order, lines, attempt, idempotency claim; 409 names the item and units left. T3 cancel/dispatch inside the state machine release/consume holds (read from the ledger); `expireUnpaidOrders` + bearer-guarded `GET /api/internal/orders/expire` (gateway asked first; COD not expired; no cron entry in `vercel.json`, see runbook). T4 `Idempotency-Key` (hash stored, 24 h replay incl. 502 outcomes, 422 on body mismatch). T5 order-number collision retry (3). T6 `PATCH /api/admin/variants/[id]` `trackInventory`/`stockAdjust` + `GET /api/admin/variants/low-stock`.
 - Migration `20261113090000_inventory_and_idempotency` (additive; CHECKs hand-added). No frontend file changed: the unchanged dashboard still works (price edits on tracked variants; `inStock` ignored for them).

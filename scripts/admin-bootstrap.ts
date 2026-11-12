@@ -5,8 +5,11 @@
  * Guarded by scripts/db-guard.ts (production needs the explicit confirmation). The password comes from the
  * ADMIN_BOOTSTRAP_PASSWORD environment variable or a hidden prompt; it is never an argument, never printed, never logged.
  * Creating refuses if any owner exists (further accounts are made by an owner through the admin API).
+ * `--additional-owner` skips that check, but only on a database proven disposable (TEST_TARGET=disposable): it is how
+ * `verify:full` gives the browser test its own owner account.
  */
 import readline from "node:readline";
+import { assertDisposableDatabase, assertTestTargetDeclared } from "../src/lib/env/test-safety";
 import { loadLocalEnv } from "./lib/safety";
 
 loadLocalEnv();
@@ -61,7 +64,12 @@ async function main() {
     return;
   }
 
-  if ((await db.adminUser.count({ where: { role: "owner" } })) > 0) throw new Error("An owner already exists. Create further accounts through the admin API, or use --reset to recover an owner.");
+  const additional = process.argv.includes("--additional-owner");
+  if (additional) {
+    assertTestTargetDeclared();
+    assertDisposableDatabase(process.env, "additional owner account");
+  }
+  if (!additional && (await db.adminUser.count({ where: { role: "owner" } })) > 0) throw new Error("An owner already exists. Create further accounts through the admin API, or use --reset to recover an owner.");
   const name = arg("name")?.trim();
   if (!name) throw new Error("--name is required");
   const r = await createUser({ email, name, role: "owner", password: await readPassword() });

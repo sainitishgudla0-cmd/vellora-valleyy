@@ -201,6 +201,103 @@ ok('content visible with reduced motion', hidden === 0, hidden);
 const loader = await rp.evaluate(() => !!document.querySelector('.fixed.inset-0.z-\\[100\\]'));
 ok('no intro loader with reduced motion', !loader);
 
+// ───────── admin: accounts, sessions, team (M4-T6)
+// Needs an owner account, which verify:full creates through the guarded bootstrap script (UI_TEST_ADMIN_*).
+const OWNER_EMAIL = process.env.UI_TEST_ADMIN_EMAIL, OWNER_PW = process.env.UI_TEST_ADMIN_PASSWORD;
+if (OWNER_EMAIL && OWNER_PW) {
+  console.log('Admin UI');
+  const NEW_PW = OWNER_PW + '-changed';
+  const viewerEmail = `smoke.ui-viewer-${Date.now()}@example.com`, VIEWER_PW = 'viewer-ui-test-passphrase-1';
+  const signIn = async (page, email, pw) => {
+    await page.goto(BASE + '/admin', { waitUntil: 'networkidle' });
+    if (email) await page.fill('#admin-email', email);
+    await page.fill('#admin-pw', pw);
+    await page.click('button:has-text("Sign in")');
+  };
+  const ac = await b.newContext({ viewport: { width: 1280, height: 900 } });
+  const ap = await ac.newPage(); watch(ap, 'admin');
+  const tab = (name) => ap.locator(`nav[aria-label="Admin sections"] a:has-text("${name}")`);
+
+  await ap.goto(BASE + '/admin', { waitUntil: 'networkidle' });
+  ok('login form asks for email and password', await ap.isVisible('#admin-email') && await ap.isVisible('#admin-pw'));
+  await signIn(ap, OWNER_EMAIL, 'wrong-password-for-ui-test');
+  await ap.waitForSelector('.field-error');
+  ok('wrong password shows one generic error and stays signed out', (await ap.locator('.field-error').innerText()).includes('Incorrect email or password') && await ap.isVisible('#admin-pw'));
+  await ap.fill('#admin-pw', OWNER_PW); await ap.click('button:has-text("Sign in")');
+  await ap.waitForSelector('[data-testid=admin-identity]');
+  ok('owner signs in and sees who they are', (await ap.locator('[data-testid=admin-identity]').innerText()).includes(`${OWNER_EMAIL} · owner`));
+  ok('owner sees Account and Team tabs', await tab('Account').isVisible() && await tab('Team').isVisible());
+  ok('existing dashboard tabs still there', await tab('Orders').isVisible() && await tab('Enquiries').isVisible() && await tab('Products').isVisible());
+
+  await tab('Account').click(); await ap.waitForSelector('text=Your sessions');
+  ok('Account shows this device and a password form', await ap.isVisible('text=This device') && await ap.isVisible('#pw-current'));
+  await ap.screenshot({ path: `${OUT}/a-account.png` });
+
+  await tab('Team').click(); await ap.waitForSelector('text=Add a person');
+  await ap.fill('#new-name', 'UI Viewer'); await ap.fill('#new-email', viewerEmail);
+  await ap.selectOption('#new-role', 'viewer'); await ap.fill('#new-password', 'short');
+  await ap.evaluate(() => document.querySelector('#new-password').removeAttribute('minlength'));
+  await ap.click('button:has-text("Add person")');
+  await ap.waitForSelector('.field-error');
+  ok('a weak initial password is refused with the reason', (await ap.locator('.field-error').innerText()).toLowerCase().includes('at least 12'));
+  await ap.fill('#new-password', VIEWER_PW); await ap.click('button:has-text("Add person")');
+  const row = ap.locator(`tr:has-text("${viewerEmail}")`);
+  await row.waitFor();
+  ok('new person appears in the team table', await row.locator('text=Active').isVisible());
+  await ap.screenshot({ path: `${OUT}/a-team.png` });
+
+  // the new viewer signs in elsewhere and gets a read-only dashboard
+  const vc = await b.newContext({ viewport: { width: 1280, height: 900 } });
+  const vp = await vc.newPage(); watch(vp, 'viewer');
+  await signIn(vp, viewerEmail, VIEWER_PW);
+  await vp.waitForSelector('[data-testid=admin-identity]');
+  ok('viewer signs in', (await vp.locator('[data-testid=admin-identity]').innerText()).includes('· viewer'));
+  ok('viewer has no Team tab', !(await vp.locator('nav[aria-label="Admin sections"] a:has-text("Team")').isVisible()));
+  const denied = await vp.evaluate(async () => (await fetch('/api/admin/users')).status);
+  ok('viewer is refused by the API too (403)', denied === 403, denied);
+
+  // owner disables the viewer: their open session ends at once
+  ap.once('dialog', (d) => d.accept());
+  await row.locator('button:has-text("Disable")').click();
+  await row.locator('text=Disabled').first().waitFor();
+  const afterDisable = await vp.evaluate(async () => (await fetch('/api/admin/me')).status);
+  ok('disabling a person signs them out immediately', afterDisable === 401, afterDisable);
+  await tab('Team').click(); await ap.waitForSelector('text=Recent activity');
+  ok('activity log shows the account creation', await ap.locator('td:has-text("user.create")').first().isVisible());
+
+  // changing own password through the UI, then signing out and in with it
+  await tab('Account').click(); await ap.waitForSelector('#pw-current');
+  await ap.fill('#pw-current', OWNER_PW); await ap.fill('#pw-new', NEW_PW); await ap.fill('#pw-again', NEW_PW);
+  await ap.click('button:has-text("Change password")');
+  await ap.waitForSelector('[role=status]:has-text("Password changed")');
+  ok('password change confirmed', true);
+  await ap.click('text=Sign out');
+  await ap.waitForSelector('#admin-pw');
+  ok('sign out returns to the login form', await ap.isVisible('#admin-email'));
+  const staleSession = await ap.evaluate(async () => (await fetch('/api/admin/me')).status);
+  ok('signed-out cookie no longer works', staleSession === 401, staleSession);
+  await signIn(ap, OWNER_EMAIL, OWNER_PW);
+  await ap.waitForSelector('.field-error');
+  ok('old password is rejected', (await ap.locator('.field-error').innerText()).includes('Incorrect'));
+  await ap.fill('#admin-pw', NEW_PW); await ap.click('button:has-text("Sign in")');
+  await ap.waitForSelector('[data-testid=admin-identity]');
+  ok('new password signs in', true);
+
+  // the shared-password transition login still works from the unchanged form (empty email)
+  if (process.env.ADMIN_PASSWORD) {
+    const lc = await b.newContext({ viewport: { width: 1280, height: 900 } });
+    const lp = await lc.newPage(); watch(lp, 'legacy');
+    await signIn(lp, '', process.env.ADMIN_PASSWORD);
+    await lp.waitForSelector('[data-testid=admin-identity]');
+    ok('shared-password sign-in still works with an empty email', (await lp.locator('[data-testid=admin-identity]').innerText()).includes('Shared password'));
+    ok('shared-password session has no Team tab', !(await lp.locator('nav[aria-label="Admin sections"] a:has-text("Team")').isVisible()));
+    await lc.close();
+  }
+  await ac.close(); await vc.close();
+} else {
+  console.log('Admin UI (skipped: UI_TEST_ADMIN_EMAIL / UI_TEST_ADMIN_PASSWORD not set)');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (errors.length) { console.log('\nBrowser errors:'); [...new Set(errors)].slice(0, 20).forEach(e => console.log(' -', e)); }
 await b.close();

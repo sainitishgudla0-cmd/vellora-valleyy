@@ -9,8 +9,13 @@ async function patch(url: string, body: unknown) {
   return res.json();
 }
 
-export function AdminLogin() {
+/**
+ * `emailRequired` is false only while the shared-password transition login is still enabled on the server
+ * (ADMIN_LEGACY_LOGIN, ADR 0012): an empty email then signs in with the shared password.
+ */
+export function AdminLogin({ emailRequired = true }: { emailRequired?: boolean }) {
   const router = useRouter();
+  const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -22,14 +27,18 @@ export function AdminLogin() {
           e.preventDefault();
           setBusy(true);
           setErr(null);
-          const res = await fetch("/api/admin/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pw }) });
+          const res = await fetch("/api/admin/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(email.trim() ? { email: email.trim(), password: pw } : { password: pw }) });
           setBusy(false);
           if (res.ok) router.refresh();
           else setErr((await res.json()).error ?? "Login failed");
         }}
       >
         <h1 className="text-[40px] leading-none">Admin</h1>
-        <label htmlFor="admin-pw" className="label mt-6">
+        <label htmlFor="admin-email" className="label mt-6">
+          {emailRequired ? "Email" : "Email (leave empty for the shared password)"}
+        </label>
+        <input id="admin-email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} className="input" required={emailRequired} />
+        <label htmlFor="admin-pw" className="label mt-4">
           Password
         </label>
         <input id="admin-pw" type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} className="input" required />
