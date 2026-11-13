@@ -166,6 +166,7 @@ model Order {
   items              OrderItem[]
   events             OrderEvent[]
   payments           Payment[]
+  refunds            Refund[]
   inventoryMovements InventoryMovement[]
   idempotencyKey     IdempotencyKey?
   /// Set only server-side, from a signed-in customer's session or an explicit claim (M5). SetNull keeps the order if the account is erased.
@@ -226,6 +227,7 @@ model Payment {
   lastCheckedAt       DateTime?
   /// Staff-entered external payment reference (UPI/bank/cash-receipt id) when a request-only payment was confirmed manually (M2-T6). Unique: one external payment cannot confirm two orders.
   manualReference     String?         @unique
+  refunds             Refund[]
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
 
@@ -737,4 +739,72 @@ model RateLimitBucket {
   resetAt DateTime
 
   @@index([resetAt])
+}
+
+enum RefundStatus {
+  pending
+  processed
+  failed
+}
+
+/// Who started a refund: staff through the admin API, or the gateway (a refund made in the Razorpay dashboard and reported by webhook).
+enum RefundSource {
+  admin
+  gateway
+}
+
+/// Append-style ledger of money returned to customers (M10, ADR 0018). Amounts are integer paise. A pending or processed
+/// row counts against the payment's refundable balance; a failed row releases it. Rows are never deleted by the app.
+model Refund {
+  id               String       @id @default(cuid())
+  orderId          String
+  order            Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  paymentId        String
+  payment          Payment      @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  amount           Int
+  currency         String       @default("INR")
+  status           RefundStatus @default(pending)
+  source           RefundSource @default(admin)
+  /// Gateway refund id (rfnd_...). NULL while the gateway call has not returned (unknown outcome).
+  providerRefundId String?      @unique
+  /// Caller-supplied idempotency key for admin requests: replaying it returns this row instead of refunding twice.
+  requestKey       String?
+  /// Staff-written reason (admin) or a fixed code (gateway). Never customer data.
+  reason           String
+  requestedBy      String?
+  /// Short machine code when status is failed or the outcome needs a human.
+  failureCode      String?
+  lastCheckedAt    DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@unique([paymentId, requestKey])
+  @@index([orderId])
+  @@index([status, createdAt])
+}
+
+enum WebhookEventStatus {
+  received
+  processed
+  ignored
+  failed
+}
+
+/// Dedupe and audit record for signed gateway webhooks (M10). One row per Razorpay event id; no payload is stored.
+model WebhookEvent {
+  id          String             @id @default(cuid())
+  provider    PaymentProvider
+  mode        PaymentMode
+  /// The gateway's event id (X-Razorpay-Event-Id): unique, so a redelivery never applies twice.
+  eventId     String
+  event       String
+  status      WebhookEventStatus @default(received)
+  /// Short machine code for what happened (e.g. paid, already_paid, unknown_order, amount_mismatch).
+  outcome     String?
+  attempts    Int                @default(1)
+  receivedAt  DateTime           @default(now())
+  processedAt DateTime?
+
+  @@unique([provider, eventId])
+  @@index([status, receivedAt])
 }

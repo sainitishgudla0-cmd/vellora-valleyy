@@ -20,6 +20,7 @@ export const PERMISSIONS = [
   "fulfilment:read", // invoices, shipments, shipping rules, tax rates, notification outbox
   "fulfilment:write", // issue invoices, create/update shipments, shipping rules, retry notifications
   "tax:write", // GST rates (set with the accountant's sign-off)
+  "refunds:write", // return money to a customer through the payment gateway (owner only: it moves real money)
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -31,7 +32,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<AdminRoleName, readonly Permissio
 };
 
 /** Permissions that only a real account may hold: the shared-password (legacy) session never gets them. */
-const ACCOUNT_ONLY: readonly Permission[] = ["users:manage"];
+const ACCOUNT_ONLY: readonly Permission[] = ["users:manage", "refunds:write"];
 
 export function hasPermission(role: AdminRoleName, permission: Permission, legacy = false): boolean {
   if (legacy && ACCOUNT_ONLY.includes(permission)) return false;

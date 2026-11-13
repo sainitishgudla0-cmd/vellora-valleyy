@@ -76,7 +76,7 @@ Production deploys are made with the Vercel CLI from a reviewed checkout of `mai
 | `ADMIN_PASSWORD` | you (`vercel env add ADMIN_PASSWORD production --sensitive`) | Sensitive |
 | `NEXT_PUBLIC_SITE_URL` | setup | `https://velora-valley.vercel.app`; change it if you add a custom domain |
 | `PAYMENT_MODE` | you, optional | Defaults to `request_only` |
-| `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_LIVE_ENABLED` | you, later (M10) | Only used with `razorpay_test` / `razorpay_live` |
+| `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `RAZORPAY_LIVE_ENABLED` | you, when launching (M10) | Only used with `razorpay_test` / `razorpay_live`; the webhook secret is required for live |
 
   Environment variable changes only take effect after a redeploy.
 - The in-memory rate limiter works per serverless instance (shared store planned, see `docs/BACKEND-ROADMAP.md`).

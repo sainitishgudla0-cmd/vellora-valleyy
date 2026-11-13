@@ -11,7 +11,7 @@
     | `mock` | development, test | — | none (M2 adds a labelled mock provider) |
     | `request_only` | all | — | none: order request, payment pending |
     | `razorpay_test` | development, test, preview | `rzp_test_` id + secret | Razorpay test |
-    | `razorpay_live` | production | `rzp_live_` id + secret + `RAZORPAY_LIVE_ENABLED=true` | Razorpay live |
+    | `razorpay_live` | production | `rzp_live_` id + secret + `RAZORPAY_LIVE_ENABLED=true` + `RAZORPAY_WEBHOOK_SECRET` (M10, ADR 0018) | Razorpay live |
 
   - `rzp_live_` keys outside production are rejected in every mode.
   - Invalid config **fails the build** (`npm run env:check` in `vercel-build` and CI) and, at runtime, disables online payment (`safePaymentConfig()` returns null and logs once) and makes `/verify` answer 503 without writes.

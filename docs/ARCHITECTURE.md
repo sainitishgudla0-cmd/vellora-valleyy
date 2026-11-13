@@ -21,7 +21,7 @@ State as of M1 (`backend/m1-foundation`). Contracts: `API-CONTRACTS.md`. Plans: 
 
 ## Key flows
 - **Order (request / COD):** `POST /api/orders` → `createOrder` (DB prices, merged lines) → `pending_confirmation` / `unpaid` → staff confirm in `/admin`.
-- **Order (Razorpay, disabled by default):** `createOrder` (`awaiting_payment`) → Razorpay order → browser Checkout.js → `POST /api/payments/razorpay/verify` → `decideVerification` → conditional `updateMany` to `paid`. No webhook yet (M10), so a closed tab can leave a paid order `awaiting_payment`.
+- **Order (Razorpay, disabled by default):** `createOrder` (`awaiting_payment`) → Razorpay order → browser Checkout.js → `POST /api/payments/razorpay/verify` → `decideVerification` → conditional `updateMany` to `paid`. Since M10 the signed webhook `POST /api/payments/razorpay/webhook` (raw-body HMAC, `WebhookEvent` dedupe) reaches the same `applyGatewayPayment`, so a closed tab no longer strands a paid order; `GET /api/internal/payments/reconcile` is the scheduled backstop; admin refunds go through the `Refund` ledger (`src/lib/payments/{webhook,refunds,reconcile}.ts`, ADR 0018).
 - **Payment mode:** `resolvePaymentConfig()` maps `PAYMENT_MODE` + resolved `APP_ENV` to allowed behaviour. Invalid config fails the build (`env:check`) and disables online payment at runtime.
 - **Admin:** single shared password → HMAC cookie (8 h, stateless). Orders, enquiries, prices and stock (M4 replaces this).
 
@@ -31,7 +31,7 @@ State as of M1 (`backend/m1-foundation`). Contracts: `API-CONTRACTS.md`. Plans: 
 | Local dev | development | local Postgres / disposable Neon branch | mock, request_only, razorpay_test |
 | Tests / CI | test | throwaway Postgres (CI service container) | mock, request_only, razorpay_test |
 | Vercel preview | preview | **must not be production**: enforced at build by `env:check` via `PRODUCTION_DB_HOSTS` (ADR 0017); the Vercel scope itself is still to be verified by the operator (`RELEASE.md` A3) | request_only, razorpay_test |
-| Vercel production | production | Neon production | request_only (now), razorpay_live (M10) |
+| Vercel production | production | Neon production | request_only (now), razorpay_live (launch checklist, `RELEASE.md` E) |
 
 ## Integration strategy (M2+)
 Extend in place rather than rewrite:

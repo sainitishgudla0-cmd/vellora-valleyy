@@ -46,11 +46,26 @@ export interface GatewayPayment {
   currency: string;
 }
 
+export interface GatewayRefund {
+  id: string;
+  paymentId: string | null;
+  amount: number;
+  currency: string;
+  /** pending | processed | failed (anything else is treated as pending by callers). */
+  status: string;
+  /** The receipt we sent when creating the refund: our Refund row id. */
+  receipt: string | null;
+}
+
 export interface RazorpayGateway {
   createOrder(amountPaise: number, receipt: string): Promise<GatewayOrder>;
   fetchPayment(paymentId: string): Promise<GatewayPayment>;
   listOrderPayments(orderId: string): Promise<GatewayPayment[]>;
   findOrdersByReceipt(receipt: string): Promise<GatewayOrder[]>;
+  /** Refund (part of) a captured payment. `receipt` is our Refund id, so a lost response can be matched later. */
+  createRefund(paymentId: string, amountPaise: number, receipt: string): Promise<GatewayRefund>;
+  fetchRefund(refundId: string): Promise<GatewayRefund>;
+  listPaymentRefunds(paymentId: string): Promise<GatewayRefund[]>;
 }
 
 const BASE = "https://api.razorpay.com/v1";
@@ -68,6 +83,13 @@ function parsePayment(v: unknown): GatewayPayment {
     throw new GatewayError("invalid_response", "Unexpected gateway payment response");
   }
   return { id: v.id, orderId: typeof v.order_id === "string" ? v.order_id : null, status: v.status, amount: v.amount, currency: v.currency };
+}
+
+function parseRefund(v: unknown): GatewayRefund {
+  if (!isObj(v) || typeof v.id !== "string" || typeof v.amount !== "number" || typeof v.currency !== "string" || typeof v.status !== "string") {
+    throw new GatewayError("invalid_response", "Unexpected gateway refund response");
+  }
+  return { id: v.id, paymentId: typeof v.payment_id === "string" ? v.payment_id : null, amount: v.amount, currency: v.currency, status: v.status, receipt: typeof v.receipt === "string" ? v.receipt : null };
 }
 
 export function createRazorpayGateway(keys: RazorpayKeys): RazorpayGateway {
@@ -113,6 +135,17 @@ export function createRazorpayGateway(keys: RazorpayKeys): RazorpayGateway {
       if (!isObj(r) || !Array.isArray(r.items)) throw new GatewayError("invalid_response", "Unexpected gateway orders list");
       return r.items.map(parseOrder);
     },
+    async createRefund(paymentId, amountPaise, receipt) {
+      return parseRefund(await call("POST", `/payments/${encodeURIComponent(paymentId)}/refund`, { amount: amountPaise, receipt, speed: "normal" }));
+    },
+    async fetchRefund(refundId) {
+      return parseRefund(await call("GET", `/refunds/${encodeURIComponent(refundId)}`));
+    },
+    async listPaymentRefunds(paymentId) {
+      const r = await call("GET", `/payments/${encodeURIComponent(paymentId)}/refunds?count=100`);
+      if (!isObj(r) || !Array.isArray(r.items)) throw new GatewayError("invalid_response", "Unexpected gateway refunds list");
+      return r.items.map(parseRefund);
+    },
   };
 }
 
@@ -120,6 +153,18 @@ export function verifyRazorpaySignatureWith(keySecret: string, orderId: string, 
   const expected = crypto.createHmac("sha256", keySecret).update(`${orderId}|${paymentId}`).digest("hex");
   const a = Buffer.from(expected);
   const b = Buffer.from(String(signature));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/**
+ * Razorpay webhook signature: lowercase hex HMAC-SHA256 of the *raw* request body with the webhook secret (not the API
+ * key secret). Constant time; never throws; a missing or malformed signature is simply false.
+ */
+export function verifyWebhookSignatureWith(webhookSecret: string, rawBody: string, signature: string | null): boolean {
+  if (!webhookSecret || !signature) return false;
+  const expected = crypto.createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
+  const a = Buffer.from(expected);
+  const b = Buffer.from(signature.trim());
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 

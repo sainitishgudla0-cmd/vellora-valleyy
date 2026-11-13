@@ -6,7 +6,7 @@ import { hashPassword, MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, passwordProblem
 describe("role × permission matrix", () => {
   // Written out in full on purpose: a change to access rules must change this table.
   const EXPECTED: Record<AdminRoleName, Permission[]> = {
-    owner: ["admin:read", "orders:write", "enquiries:write", "variants:write", "catalog:write", "inventory:write", "testdata:write", "users:manage", "wholesale:read", "wholesale:write", "pricing:write", "fulfilment:read", "fulfilment:write", "tax:write"],
+    owner: ["admin:read", "orders:write", "enquiries:write", "variants:write", "catalog:write", "inventory:write", "testdata:write", "users:manage", "wholesale:read", "wholesale:write", "pricing:write", "fulfilment:read", "fulfilment:write", "tax:write", "refunds:write"],
     operations: ["admin:read", "orders:write", "enquiries:write", "variants:write", "inventory:write", "wholesale:read", "wholesale:write", "fulfilment:read", "fulfilment:write"],
     catalog: ["admin:read", "variants:write", "catalog:write", "inventory:write", "wholesale:read", "pricing:write"],
     viewer: ["admin:read"],
@@ -15,8 +15,10 @@ describe("role × permission matrix", () => {
     for (const p of PERMISSIONS) expect(hasPermission(role, p), `${role} ${p}`).toBe(EXPECTED[role].includes(p));
     expect([...ROLE_PERMISSIONS[role]].sort()).toEqual([...EXPECTED[role]].sort());
   });
-  it("the shared-password (legacy) session never manages users, whatever role it carries", () => {
+  it("the shared-password (legacy) session never manages users or moves money, whatever role it carries", () => {
     expect(hasPermission("owner", "users:manage", true)).toBe(false);
+    expect(hasPermission("owner", "refunds:write", true)).toBe(false);
+    expect(hasPermission("operations", "refunds:write")).toBe(false);
     expect(hasPermission("owner", "orders:write", true)).toBe(true);
   });
   it("an unknown role has no permissions", () => {
