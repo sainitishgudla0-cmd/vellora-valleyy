@@ -13,7 +13,8 @@ Operator-only procedures. Agents must not run anything in the "production" secti
 | `db:schema:diff` | read-only: live DB vs `schema.prisma` (exit 0 = identical, 2 = drift) | any |
 | `db:baseline:sql` | offline SQL for the full schema | no DB |
 | `db:seed` | catalogue upsert | disposable; production only with the same confirmation |
-| `db:cleanup-tests` | delete `SMOKE TEST` rows | disposable + `TEST_TARGET=disposable` |
+| `db:cleanup-tests` | delete `SMOKE TEST` rows (and all rate-limit counters) | disposable + `TEST_TARGET=disposable` |
+| `db:restore-drill` | backup, restore into a scratch DB, verify (M9-T7) | disposable only |
 
 ## Current state (M1)
 - `prisma/migrations/0_init` was generated **offline** from `schema.prisma` (`prisma migrate diff --from-empty`). It applies cleanly to an empty Postgres 16 and `db:schema:diff` reports no drift (verified on a throwaway DB).
@@ -111,3 +112,13 @@ Additive: `Payment.manualReference` (unique, request-only only via CHECK) and `O
 - The checkout now shows the delivery fee for the entered pincode (live, from the shipping rules) and sends an `Idempotency-Key` with each distinct order request. With no shipping rules nothing visible changes ("To be confirmed").
 - Guest and signed-in customers can download their tax invoice from the order page once staff issue it; tracking appears once a shipment is recorded.
 - CI now runs the browser suite inside `verify:full`; a failing run uploads Playwright traces as an artifact.
+
+## M9 migration `rate_limit_buckets` and operator notes
+- **Migration `20261118090000_rate_limit_buckets`:** one new table `RateLimitBucket(key, count, resetAt)` plus an index. Additive, no backfill, no locks on existing tables. **Rollback:** `DROP TABLE "RateLimitBucket"` is safe at any time; the app then falls back to per-instance limits (it logs `rate_limit.database_unavailable` once a minute). Order as usual: migrate first, then deploy.
+- The table holds short-lived counters keyed by an HMAC of the client IP (no addresses). Expired rows are purged opportunistically; an empty or truncated table only resets the windows.
+- **New settings:** `PRODUCTION_DB_HOSTS` (every scope; see `RELEASE.md` A2), `RATE_LIMIT_STORE` (optional), `LOG_LEVEL` (optional). `npm run env:check` now also reports "database isolation ok".
+
+## Backup and restore drill (M9-T7)
+`npm run db:restore-drill` (disposable source only; needs `pg_dump`/`pg_restore`/`psql` on PATH or `PG_BIN`) takes a custom-format dump, restores it into a new scratch database on the same server, and checks: every table present, per-table row count and an order-independent content checksum equal, applied-migration count equal, constraint and index counts equal, `prisma migrate status` up to date and no schema drift on the copy. It prints dump and restore timings and drops only the scratch database it created. It exits 1 on any difference (a tampered copy was confirmed to fail it).
+- **Evidence (2026-11-12, local Postgres 16.13, Node 24):** 34 tables, 13 migrations, all checks passed; dump 0.3 s and restore 0.4 s for an 11.6 MB database (0.1 MB archive). That proves the procedure and the verification, not production timing.
+- **Production drill (operator):** (1) Neon console: create a branch from production at a chosen past time (point-in-time) or from now; (2) point a scratch `DATABASE_URL` at that branch in a one-off shell, never in `.env`; (3) `npm run db:migrate:status` must say up to date and `npm run db:schema:diff` no difference; (4) compare row counts of `Order`, `Invoice`, `Payment`, `Customer`, `InventoryMovement` with production for the restore point; check the newest `Invoice.number` per financial year equals the counter; (5) run the read-only paths (`/api/products`, an order page) against a local server using that branch; (6) delete the branch; (7) record the date, the restore point used, and the elapsed time in `PROGRESS.md`. Targets: `RELEASE.md` D.

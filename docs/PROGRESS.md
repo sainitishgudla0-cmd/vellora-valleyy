@@ -3,9 +3,9 @@
 _Read this first in a new session. Keep it under ~80 lines. Scope and AC per task: `BACKEND-ROADMAP.md`._
 
 ## Current
-- **Milestone:** M1-M7 integrated. **M8 (frontend/backend integration, Playwright E2E, contract tests) complete and integrated**. M9 needs approval.
+- **Milestone:** M1-M8 integrated. **M9 (production hardening) code and docs complete on `backend/m9-hardening`**; operator-only items remain (see `RELEASE.md`). M10 needs approval.
 - **Branch:** M1 is integrated: `backend/development` fast-forwarded from `backend/m2-payments` after each task (no PR workflow); see the M2-T6 entry for the latest SHA and CI run. `main` = `55aa848`, untouched. Working copy moved to `~/Developer/Velora-Valley` (the Desktop copy is iCloud-synced and spawns duplicate files). `main` = `55aa848`, untouched.
-- **Last verified:** 2026-11-11, `npm run verify:full` on throwaway Postgres 16 (127.0.0.1): all gates green. See the M1 evidence below.
+- **Last verified:** 2026-11-12, `npm run verify:full` with `VERIFY_UI=1` on throwaway Postgres 16: all gates green (M9 evidence below).
 
 ## Next up
 | Task | Status | Notes |
@@ -16,17 +16,22 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 | M6 wholesale | done (API only; no UI until M8) | ADR 0014 |
 | M7 GST / invoices / shipping / notifications | done (API only) | ADR 0015 |
 | M8 integration + E2E | done | ADR 0016 |
-| M9 | proposed (needs approval) | see `BACKEND-ROADMAP.md` |
+| M9 hardening | code done (T2-T7, T9); T1/T8/T10 + Vercel parts are operator checklists | ADR 0017, `RELEASE.md` |
+| M10 Razorpay webhooks, refunds, launch | proposed (needs approval) | see `BACKEND-ROADMAP.md` |
 
 ## Blockers / open items
-1. **Preview DB isolation unverified.** Vercel project settings weren't accessible (local CLI account can't see the production team; Vercel MCP unauthorised). GitHub shows no Vercel deployments or statuses for this repo, so previews don't appear to be Git-triggered. M1 builds are DB-write-free regardless; reads during a preview build would still use whatever `DATABASE_URL` preview has. Owner: user (Vercel dashboard).
-2. **Production not baselined** onto Prisma Migrate (`docs/RUNBOOK-DATABASE.md`). Operator task, planned in M9-T1 or before the first production migration.
+1. **Preview DB isolation: code enforced, settings unverified.** `env:check` now fails a preview build that uses a production DB host or lacks `PRODUCTION_DB_HOSTS` (ADR 0017). What the Vercel Preview scope actually holds can't be seen from here (no team access): operator checklist `RELEASE.md` A2/A3.
+2. **Production not baselined** onto Prisma Migrate (`RUNBOOK-DATABASE.md`, `RELEASE.md` A1). Operator task (M9-T1); 13 migrations wait. Also operator: branch protection (T8, `RELEASE.md` A4), monitoring vendor and uptime check, production restore drill, RPO/RTO sign-off.
 3. (resolved) CI green on `backend/development` @ `38b476e`.
-4. Dev-dependency advisories: `postcss` (high), `esbuild` via `tsx` (moderate). Prod deps clean. Tracked as M9-T9.
+4. (resolved M9-T9) `npm audit` is 0 including dev; CI audits every push.
 5. (resolved 2026-11-12) iCloud sync duplicates ("<name> 2.ext") in `~/Desktop/Velora Valley`; repo relocated to `~/Developer/Velora-Valley`. Stage files by explicit path only (never `git add .` / `git add docs`).
 6. Local Node is 20.19.6; project targets 24 (`.nvmrc`, CI uses 24).
 
 ## Done
+### M9 — production hardening (`backend/m9-hardening`, ADR 0017)
+- T3 CSP/HSTS/frame-ancestors/Referrer-Policy/Permissions-Policy on every response (`config/security-headers.mjs`; `script-src 'unsafe-inline'` remains, nonce CSP is a follow-up). T4 `rateLimit()` now shared across instances through Postgres (`RateLimitBucket`, atomic upsert, HMAC'd IP keys, per-instance fallback if the DB is down; migration `20261118090000_rate_limit_buckets`). T5 `src/lib/log.ts` structured JSON logs (all `console.*` converted, ratchet), `onRequestError` hook, `GET /api/health` uptime probe; vendor not chosen. T2 `env:check` refuses a preview on a production DB host or without `PRODUCTION_DB_HOSTS`. T6 ESLint in verify/CI (0 errors; 12 frozen-frontend warnings as a ratchet). T9 postcss/tsx upgraded + minimatch override: `npm audit` 0 incl. dev. T7 `npm run db:restore-drill`. T10 `docs/RELEASE.md` (release checklist, rollback, targets).
+- **Not done (operator/GitHub/Vercel, by rule):** production baselining, Vercel Preview scope check, branch protection and required CI, production restore drill, uptime/monitoring vendor, RPO/RTO and CSP/HSTS decisions. All have checklists in `RELEASE.md`.
+- **Evidence (2026-11-12, Node 24.22.3, throwaway Postgres 16.13, fresh DB):** `verify:full` + `VERIFY_UI=1` -> typecheck ok, unit 609/609, env ok (database isolation ok), migrate deploy ok (13), schema diff none, integration 523/523, build ok, smoke 70/0 (incl. security headers, `/api/health`), Playwright 50/50 under the CSP (22 visual comparisons still identical), restore drill passed (34 tables, 13 migrations), `npm audit` 0, `npm run lint` 0 errors/12 warnings. Mutation checks: limiter SQL (UTC cast, increment) and the drill verifier each fail their tests when broken.
 ### M8 — frontend integration and browser tests (`backend/m8-integration`, ADR 0016)
 - T1 `CheckoutForm`: explained failures (server message / "nothing charged" for 5xx and proxy pages / "could not reach the store"), live delivery fee and an unserviceable pincode flagged next to the field (legacy wording unchanged when no rules), `Idempotency-Key` per distinct request. T4 order page shows shipment tracking and a tax-invoice download (`GET /api/orders/[number]/invoice?t=`). T2/T3 new pages `/account` (sign-in by code, orders + claim, addresses, privacy, **wholesale portal**: apply, status, prices, quotes, accept/decline) and `/account/orders/[number]`. Header, footer and every existing page untouched; `/account` is linked from nowhere yet (design decision for you). T5 `playwright-core` + `scripts/e2e-ui.mjs` replaced by `@playwright/test` 1.55.1 and `tests/e2e/*.spec.ts` (guest, account, wholesale, admin, responsive, visual), run inside `verify:full` and in CI with the runner's Chrome. T6 `api-contract-coverage` unit test: every route documented, every documented route real, every route tested.
 - **Visual regression:** 22 baseline screenshots of the 11 existing pages (desktop + mobile) were captured before any frontend change and re-compared after: 22/22 identical (<=0.1% pixels). Baselines are 48 MB so they are local and gitignored; Linux CI skips the visual spec.

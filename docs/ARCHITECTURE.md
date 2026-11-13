@@ -30,7 +30,7 @@ State as of M1 (`backend/m1-foundation`). Contracts: `API-CONTRACTS.md`. Plans: 
 |---|---|---|---|
 | Local dev | development | local Postgres / disposable Neon branch | mock, request_only, razorpay_test |
 | Tests / CI | test | throwaway Postgres (CI service container) | mock, request_only, razorpay_test |
-| Vercel preview | preview | **must not be production** (unverified, see PROGRESS blockers) | request_only, razorpay_test |
+| Vercel preview | preview | **must not be production**: enforced at build by `env:check` via `PRODUCTION_DB_HOSTS` (ADR 0017); the Vercel scope itself is still to be verified by the operator (`RELEASE.md` A3) | request_only, razorpay_test |
 | Vercel production | production | Neon production | request_only (now), razorpay_live (M10) |
 
 ## Integration strategy (M2+)

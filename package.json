@@ -25,6 +25,7 @@
     "db:migrate:status": "prisma migrate status",
     "db:schema:diff": "prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-datamodel prisma/schema.prisma --exit-code",
     "db:baseline:sql": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script",
+    "db:restore-drill": "tsx scripts/db-guard.ts \"restore drill\" && tsx scripts/restore-drill.ts",
     "db:seed": "tsx prisma/seed.ts",
     "db:setup": "npm run db:migrate:deploy && npm run db:seed",
     "payments:reconcile": "tsx scripts/db-guard.ts \"payments reconcile\" --production && tsx --conditions=react-server scripts/reconcile-payments.ts",
