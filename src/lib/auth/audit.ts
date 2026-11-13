@@ -1,4 +1,5 @@
 import "server-only";
+import { log } from "@/lib/log";
 import { db } from "@/lib/db";
 
 /**
@@ -34,6 +35,6 @@ export async function writeAudit(e: AuditEntry): Promise<void> {
       },
     });
   } catch {
-    console.error(`[audit] could not record action=${e.action} outcome=${e.outcome}`);
+    log.error("audit.write_failed", { action: e.action, outcome: e.outcome });
   }
 }

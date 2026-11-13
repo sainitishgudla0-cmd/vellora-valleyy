@@ -1,4 +1,5 @@
 import "server-only";
+import { log } from "@/lib/log";
 import crypto from "node:crypto";
 import { db } from "@/lib/db";
 
@@ -60,7 +61,7 @@ export async function storeResponse(keyHash: string, status: number, body: unkno
   try {
     await db.idempotencyKey.updateMany({ where: { keyHash, responseStatus: null }, data: { responseStatus: status, responseBody: JSON.stringify(body) } });
   } catch {
-    console.error("[orders] could not store idempotent response");
+    log.error("orders.idempotent_response_not_stored");
   }
 }
 

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { log, errorName } from "@/lib/log";
 import { fail, parseBody } from "@/lib/api";
 import { orderSchema } from "@/lib/validation";
 import { createOrder, IdempotencyConflictError, OrderError } from "@/lib/orders";
@@ -49,7 +50,7 @@ export async function POST(req: Request) {
   } catch (e) {
     if (e instanceof IdempotencyConflictError && claim) return fromStored(await lookupKey(claim.keyHash, claim.requestHash));
     if (e instanceof OrderError) return fail(e.message, e.status, e.fields);
-    console.error("[orders] unexpected failure creating order"); // no error object: it may carry customer data
+    log.error("orders.create_failed", { errorName: errorName(e) }); // class name only: the message may carry customer data
     return fail("Something went wrong while placing your order. Please try again.", 500);
   }
 }

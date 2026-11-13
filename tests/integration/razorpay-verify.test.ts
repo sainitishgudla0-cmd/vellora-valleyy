@@ -46,6 +46,7 @@ beforeEach(async () => {
   vi.stubEnv("RAZORPAY_KEY_SECRET", TEST_KEY_SECRET);
   vi.stubEnv("MOCK_PAYMENT_CONFIRM_KEY", "");
   rate.rateLimit.mockResolvedValue(true);
+  vi.stubEnv("LOG_LEVEL", "error"); // the structured logger is quiet under test unless asked; these tests assert on what it writes
   errors = vi.spyOn(console, "error").mockImplementation(() => {});
   fake = new FakeRazorpay().install();
   variantId ??= (await db.variant.findFirstOrThrow({ where: { inStock: true, product: { active: true } } })).id;

@@ -1,4 +1,5 @@
 import "server-only";
+import { log } from "@/lib/log";
 import { db } from "@/lib/db";
 import type { PaymentConfig } from "@/lib/env/payment-config";
 import { applyGatewayPayment } from "@/lib/payments/razorpay-verify";
@@ -89,7 +90,7 @@ export async function expireUnpaidOrders(config: PaymentConfig, opts: { windowMi
       else summary.skipped++;
     } catch (e) {
       summary.errors++; // gateway unavailable or database failure: retry on the next run, never guess
-      console.error(`[expire] check failed order=${a.order.number} kind=${e instanceof GatewayError ? e.kind : "unexpected"}`);
+      log.error("expire.attempt_check_failed", { order: a.order.number, reason: e instanceof GatewayError ? e.kind : "unexpected" });
     }
   }
   return summary;

@@ -1,4 +1,5 @@
 import "server-only";
+import { log } from "@/lib/log";
 import { db } from "@/lib/db";
 import type { PaymentConfig } from "@/lib/env/payment-config";
 import { cancelAfterGatewayFailure } from "./checkout";
@@ -78,7 +79,7 @@ export async function reconcilePendingPayments(config: PaymentConfig, opts: { li
       }
     } catch (e) {
       summary.errors++; // gateway unavailable or similar: retry on the next run; never guess
-      console.error(`[reconcile] attempt check failed order=${a.order.number} kind=${e instanceof GatewayError ? e.kind : "unexpected"}`);
+      log.error("reconcile.attempt_check_failed", { order: a.order.number, reason: e instanceof GatewayError ? e.kind : "unexpected" });
     }
   }
   return summary;

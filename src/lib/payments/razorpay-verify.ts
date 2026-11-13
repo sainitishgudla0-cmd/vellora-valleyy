@@ -1,4 +1,5 @@
 import "server-only";
+import { log } from "@/lib/log";
 import { Prisma, type PaymentStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import type { PaymentConfig } from "@/lib/env/payment-config";
@@ -42,7 +43,7 @@ class Abort extends Error {
   }
 }
 
-const log = (order: string, what: string) => console.error(`[payments] verify ${what} order=${order}`); // order number + code only
+const note = (order: string, event: string, reason?: string) => log.error(`payments.verify_${event}`, { order, reason }); // order number + code only
 
 export async function verifyRazorpayCheckout(input: VerifyInput & { orderNumber: string }, config: PaymentConfig | null): Promise<RazorpayVerifyResult> {
   const order = await db.order.findUnique({
@@ -89,7 +90,7 @@ export async function verifyRazorpayCheckout(input: VerifyInput & { orderNumber:
       await flagForReconciliation(attempt.id, "payment_not_found_at_gateway");
       return conflict(order.number, "gateway_mismatch");
     }
-    log(order.number, `gateway lookup failed kind=${e instanceof GatewayError ? e.kind : "unexpected"}`);
+    note(order.number, "gateway_lookup_failed", e instanceof GatewayError ? e.kind : "unexpected");
     await flagForReconciliation(attempt.id, "verify_gateway_unavailable");
     return { kind: "gateway_unavailable" };
   }
@@ -154,7 +155,7 @@ async function markPaid(order: ApplyInput["order"], attempt: { id: string; amoun
       // an identical concurrent verification may have won: that is the idempotent success
       const a = await db.payment.findUnique({ where: { id: attempt.id } });
       if (a?.status === "paid" && a.providerPaymentId === providerPaymentId) return { kind: "already_paid" };
-      log(order.number, `conflict reason=${e.result.kind === "conflict" ? e.result.reason : "?"}`);
+      note(order.number, "conflict", e.result.kind === "conflict" ? e.result.reason : "?");
       return e.result;
     }
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") return conflict(order.number, "payment_id_in_use"); // payment id already pays another order
@@ -184,6 +185,6 @@ async function markFailed(order: ApplyInput["order"], attempt: { id: string }): 
 }
 
 function conflict(orderNumber: string, reason: RazorpayVerifyConflict): RazorpayVerifyResult {
-  log(orderNumber, `conflict reason=${reason}`);
+  note(orderNumber, "conflict", reason);
   return { kind: "conflict", reason };
 }

@@ -1,4 +1,5 @@
 import "server-only";
+import { log } from "@/lib/log";
 import { NotifyConfigError, resolveNotifyConfig } from "@/lib/env/notify-config";
 
 /**
@@ -42,7 +43,7 @@ const mock: EmailProvider = {
       throw new Error(f.message);
     }
     mockMailbox.push({ ...mail, at: new Date() });
-    if (process.env.NODE_ENV !== "test") console.info(`[mock-mail] to=${mail.to} subject="${mail.subject}" (development only, not sent)`);
+    log.dev(`[mock-mail] to=${mail.to} subject="${mail.subject}" (development only, not sent)`);
   },
 };
 
@@ -51,7 +52,7 @@ export function currentEmailProvider(): EmailProvider | null {
     return resolveNotifyConfig().mode === "mock" ? mock : null;
   } catch (e) {
     if (!(e instanceof NotifyConfigError)) throw e;
-    console.error(`[notify] ${e.message} Notifications are disabled.`);
+    log.error("notify.config_invalid", { detail: e.message, effect: "notifications disabled" });
     return null;
   }
 }

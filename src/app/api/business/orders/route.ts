@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { log, errorName } from "@/lib/log";
 import { fail, parseBody } from "@/lib/api";
 import { IdempotencyConflictError } from "@/lib/orders";
 import { hashKey, hashRequest, lookupKey, readIdempotencyKey, storeResponse, type StoredKey } from "@/lib/orders/idempotency";
@@ -34,7 +35,7 @@ export async function POST(req: Request) {
     if (e instanceof IdempotencyConflictError && claim) return fromStored(await lookupKey(claim.keyHash, claim.requestHash));
     const o = orderFailure(e);
     if (o) return o;
-    console.error("[business] unexpected failure creating order");
+    log.error("business.order_create_failed", { errorName: errorName(e) });
     return fail("Something went wrong while placing your order. Please try again.", 500);
   }
 }

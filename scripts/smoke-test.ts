@@ -53,6 +53,18 @@ async function main() {
   await assertServerIsDisposable(BASE);
   console.log(`Smoke testing ${BASE} (disposable environment confirmed)\n`);
 
+  console.log("Security headers (M9-T3)");
+  for (const path of ["/", "/api/products", "/account"]) {
+    const r = await req(path);
+    const csp = r.headers.get("content-security-policy") ?? "";
+    check(`${path}: CSP forbids framing and plugins`, csp.includes("frame-ancestors 'none'") && csp.includes("object-src 'none'"), csp.slice(0, 80));
+    check(`${path}: HSTS, nosniff, referrer policy, X-Frame-Options`, /max-age=\d{8,}/.test(r.headers.get("strict-transport-security") ?? "") && r.headers.get("x-content-type-options") === "nosniff" && r.headers.get("referrer-policy") === "strict-origin-when-cross-origin" && r.headers.get("x-frame-options") === "DENY");
+    check(`${path}: no X-Powered-By banner`, !r.headers.get("x-powered-by"));
+  }
+
+  const health = await req("/api/health");
+  check("GET /api/health is 200 { ok: true } with no-store", health.status === 200 && health.body?.ok === true && health.headers.get("cache-control") === "no-store", health.body);
+
   console.log("Catalogue");
   const all = await req("/api/products");
   check("GET /api/products returns products", all.status === 200 && all.body.count >= 30, all.body.count);

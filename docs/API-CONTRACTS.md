@@ -57,6 +57,9 @@ Write-capable test handshake. **`404` whenever `APP_ENV` resolves to production 
 ### `GET /api/internal/test-environment/otp?email=` (M8, tests only)
 For browser tests, which cannot read an email: the newest mock sign-in code for an address (`200 { code }`). **`404` everywhere except a server that is `APP_ENV` development/test AND `CUSTOMER_OTP_MODE=mock` AND declares a disposable database** (so never preview/production, where mock mode is refused by `env:check`); also `404` for an address with no code. Never returns anything on a real deployment.
 
+### `GET /api/health` (M9, uptime probe)
+`200 { ok: true }` when the app can run `SELECT 1` against its database within 3 s, otherwise `503 { ok: false }`. Public, never cached (`Cache-Control: no-store`), and deliberately minimal: no versions, hosts or error text (the failure reason is logged as `health.database_unreachable`). Point the uptime monitor here.
+
 ### `GET /api/orders/[number]/invoice?t=<access token>` (M8)
 The tax invoice PDF for the holder of the order's access token (the same `t` the order page uses). `404` for a wrong token, an uninvoiced order or an unknown number (identical); `429` rate limited. Headers: `Cache-Control: private, no-store`, `Referrer-Policy: no-referrer`, attachment filename `VV-26-27-000001.pdf`.
 

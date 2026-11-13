@@ -1,4 +1,5 @@
 import { fail, json, parseBody } from "@/lib/api";
+import { log, errorName } from "@/lib/log";
 import { writeAudit } from "@/lib/auth/audit";
 import { requireBusiness } from "@/lib/wholesale/auth";
 import { failure, orderFailure } from "@/lib/wholesale/http";
@@ -24,7 +25,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ number:
   } catch (e) {
     const o = orderFailure(e);
     if (o) return o;
-    console.error("[business] unexpected failure accepting quote");
+    log.error("business.quote_accept_failed", { errorName: errorName(e) });
     return fail("Something went wrong while placing your order. Please try again.", 500);
   }
 }

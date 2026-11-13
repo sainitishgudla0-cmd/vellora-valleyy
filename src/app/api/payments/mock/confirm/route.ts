@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { log } from "@/lib/log";
 import { fail, json, parseBody } from "@/lib/api";
 import { safePaymentConfig } from "@/lib/payments";
 import { confirmMockPayment } from "@/lib/payments/mock-confirm";
@@ -46,7 +47,7 @@ export async function POST(req: Request) {
       return fail("Mock payment proof is invalid. No changes were made.", 400);
     case "conflict":
       // log the order number and reason only: never the token, signature or customer details
-      console.error(`[payments] mock confirm conflict order=${parsed.data.orderNumber} reason=${result.reason}`);
+      log.error("payments.mock_confirm_conflict", { order: parsed.data.orderNumber, reason: result.reason });
       return fail(CONFLICT, 409);
   }
 }

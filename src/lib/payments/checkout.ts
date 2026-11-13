@@ -1,4 +1,5 @@
 import "server-only";
+import { log } from "@/lib/log";
 import { db } from "@/lib/db";
 import { transitionOrder } from "@/lib/orders/state-machine";
 import { GatewayError } from "./providers/razorpay";
@@ -39,7 +40,7 @@ export async function startOnlinePayment(order: OrderRef, attemptId: string, pro
       await cancelAfterGatewayFailure(order.id, attemptId, e.kind === "rejected" ? "gateway_rejected" : "gateway_invalid_response");
       return { kind: "definite" };
     }
-    console.error(`[payments] gateway outcome unknown order=${order.number} reason=${e instanceof GatewayError ? e.kind : "unexpected"}`);
+    log.error("payments.gateway_outcome_unknown", { order: order.number, reason: e instanceof GatewayError ? e.kind : "unexpected" });
     await flagForReconciliation(attemptId, "create_outcome_unknown");
     return { kind: "ambiguous" };
   }
@@ -59,7 +60,7 @@ export async function startOnlinePayment(order: OrderRef, attemptId: string, pro
       if (a.count !== 1 || o.count !== 1) throw new Abort();
     });
   } catch {
-    console.error(`[payments] gateway order created but not persisted order=${order.number}`);
+    log.error("payments.gateway_order_not_persisted", { order: order.number });
     await flagForReconciliation(attemptId, "persist_failed");
     return { kind: "ambiguous" };
   }
@@ -70,7 +71,7 @@ export async function flagForReconciliation(attemptId: string, reason: string) {
   try {
     await db.payment.updateMany({ where: { id: attemptId, status: { in: ["unpaid", "failed"] } }, data: { needsReconciliation: true, reconcileReason: reason } });
   } catch {
-    console.error(`[payments] could not flag attempt for reconciliation reason=${reason}`); // the attempt row stays unpaid with no reference: still findable
+    log.error("payments.reconcile_flag_failed", { reason }); // the attempt row stays unpaid with no reference: still findable
   }
 }
 
@@ -87,7 +88,7 @@ export async function cancelAfterGatewayFailure(orderId: string, attemptId: stri
     });
   } catch {
     // stale (someone else already moved the order) or a database failure: leave it recoverable instead of guessing
-    console.error(`[payments] could not cancel after gateway failure reason=${reason}`);
+    log.error("payments.cancel_after_failure_failed", { reason });
     await flagForReconciliation(attemptId, reason);
   }
 }

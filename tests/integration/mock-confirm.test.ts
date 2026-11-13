@@ -222,6 +222,7 @@ describe("authorization and gating (real route, real database)", () => {
   });
 
   it("does not log tokens, signatures or customer details on conflict", async () => {
+    vi.stubEnv("LOG_LEVEL", "error");
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     const f = await createMockOrderWithAttempt({ status: "cancelled" });
     await post(confirmBody(f));

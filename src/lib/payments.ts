@@ -1,4 +1,5 @@
 import "server-only";
+import { log } from "@/lib/log";
 import { PaymentConfigError, resolvePaymentConfig, type PaymentConfig } from "./env/payment-config";
 import { providerForConfig, type PaymentProvider } from "./payments/providers";
 import { createRazorpayOrder as rpCreateOrder, verifyRazorpaySignatureWith } from "./payments/providers/razorpay";
@@ -19,7 +20,7 @@ export function safePaymentConfig(): PaymentConfig | null {
     const msg = e instanceof PaymentConfigError ? e.message : String(e);
     if (msg !== lastLoggedError) {
       lastLoggedError = msg;
-      console.error(`[payments] ${msg} Online payments are disabled.`);
+      log.error("payments.config_invalid", { detail: msg, effect: "online payments disabled" });
     }
     return null;
   }

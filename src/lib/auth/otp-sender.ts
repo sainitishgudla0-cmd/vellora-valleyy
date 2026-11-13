@@ -1,4 +1,5 @@
 import "server-only";
+import { log } from "@/lib/log";
 import { OtpConfigError, resolveOtpConfig } from "@/lib/env/otp-config";
 
 /**
@@ -24,7 +25,7 @@ const mockSender: OtpSender = {
   id: "mock",
   async send({ email, code }) {
     mockOtpOutbox.push({ email, code, at: new Date() });
-    if (process.env.NODE_ENV !== "test") console.info(`[mock-otp] sign-in code for ${email}: ${code} (development only)`);
+    log.dev(`[mock-otp] sign-in code for ${email}: ${code} (development only)`);
   },
 };
 
@@ -36,7 +37,7 @@ export function currentOtpSender(): OtpSender | null {
     const msg = e instanceof OtpConfigError ? e.message : String(e);
     if (msg !== lastLogged) {
       lastLogged = msg;
-      console.error(`[otp] ${msg} Customer sign-in is disabled.`);
+      log.error("otp.config_invalid", { detail: msg, effect: "customer sign-in disabled" });
     }
     return null;
   }
