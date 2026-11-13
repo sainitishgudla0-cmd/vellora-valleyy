@@ -73,7 +73,7 @@ function main() {
     console.log("Verification");
     check("every table restored", psql(src, scratch, `SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'`) === String(tables.length), `${tables.length} tables`);
 
-    let mismatched: string[] = [];
+    const mismatched: string[] = [];
     let rows = 0;
     for (const table of tables) {
       // row count + content checksum (order-independent), computed identically on both sides
