@@ -37,7 +37,8 @@ async function main() {
   await db.priceList.deleteMany({ where: { name: { startsWith: "e2e-" } } });
   const customers = await db.customer.deleteMany({ where: { email: { startsWith: "smoke." } } });
   const admins = await db.adminUser.deleteMany({ where: { email: { startsWith: "smoke." } } }); // browser-test accounts (sessions cascade)
-  console.log(`Removed ${orders.count} test orders, ${enquiries.count} test enquiries, ${subs.count} test subscribers, ${admins.count} test admin accounts, ${customers.count} test shoppers`);
+  const limits = await db.rateLimitBucket.deleteMany({}); // counters live in the (disposable) database now: a re-run must not inherit a spent window
+  console.log(`Removed ${limits.count} rate-limit counters, ${orders.count} test orders, ${enquiries.count} test enquiries, ${subs.count} test subscribers, ${admins.count} test admin accounts, ${customers.count} test shoppers`);
 }
 
 main().finally(() => db.$disconnect());

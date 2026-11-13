@@ -728,3 +728,13 @@ model OutboxMessage {
 
   @@index([status, nextAttemptAt])
 }
+
+/// Fixed-window request counters shared by every server instance (M9-T4, ADR 0017). The key is
+/// "<bucket>:<hmac of the client IP>": no raw IP addresses are stored. Rows are tiny and short-lived.
+model RateLimitBucket {
+  key     String   @id
+  count   Int
+  resetAt DateTime
+
+  @@index([resetAt])
+}

@@ -5,6 +5,7 @@
 import { resolvePaymentConfig, PaymentConfigError } from "../src/lib/env/payment-config";
 import { NotifyConfigError, resolveNotifyConfig } from "../src/lib/env/notify-config";
 import { OtpConfigError, resolveOtpConfig } from "../src/lib/env/otp-config";
+import { checkDatabaseIsolation } from "../src/lib/env/isolation";
 import { loadLocalEnv } from "./lib/safety";
 
 loadLocalEnv();
@@ -32,5 +33,18 @@ try {
   console.log(`[check-env] NOTIFY_MODE=${n.mode}`);
 } catch (e) {
   console.error(`[check-env] ${e instanceof NotifyConfigError ? e.issues.join("\n[check-env] ") : e}`);
+  process.exit(1);
+}
+
+try {
+  const iso = checkDatabaseIsolation();
+  for (const w of iso.warnings) console.warn(`[check-env] warning: ${w}`);
+  if (!iso.ok) {
+    console.error(`[check-env] ${iso.issues.join("\n[check-env] ")}`);
+    process.exit(1);
+  }
+  console.log("[check-env] database isolation ok");
+} catch (e) {
+  console.error(`[check-env] ${e}`);
   process.exit(1);
 }
