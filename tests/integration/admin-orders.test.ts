@@ -1,5 +1,5 @@
 /** M2-T6: admin PATCH through the real route, state machine and Postgres. */
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { cleanupAdminFixtures, createTestAdmin } from "../support/admin";
 import { cleanupFixtures, createFixtureOrder, createMockOrderWithAttempt, createRazorpayOrderWithAttempt } from "../support/mock-orders";

@@ -1,4 +1,4 @@
-import { fail, json, parseBody } from "@/lib/api";
+import { json, parseBody } from "@/lib/api";
 import { requireCustomer } from "@/lib/auth/customer";
 import { createAddress, listAddresses } from "@/lib/account/addresses";
 import { addressCreateSchema } from "@/lib/account/schemas";

@@ -36,8 +36,6 @@ function quoteNumber() {
   return `QT-${ymd}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
 }
 
-const itemSelect = { variantId: true, productName: true, variantLabel: true, sku: true, quantity: true, unitPrice: true, lineTotal: true } as const;
-
 /** Buyer-facing quote. Prices appear only once staff have quoted. */
 export function buyerView(q: Prisma.QuoteGetPayload<{ include: { items: true; order: { select: { number: true } } } }>) {
   const priced = q.status === "quoted" || q.status === "accepted" || q.status === "expired" || q.status === "declined" || q.status === "cancelled";

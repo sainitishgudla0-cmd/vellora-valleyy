@@ -27,11 +27,20 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      - name: Lint (errors fail; the warning count is a ratchet, see eslint.config.mjs)
+        run: npm run lint
       - run: npm run test
+      - name: Dependency audit (production and dev dependencies)
+        run: npm audit --audit-level=high
       - name: Env gate rejects unsafe production payment config
         run: |
           VERCEL_ENV=production npm run -s env:check
           if VERCEL_ENV=production PAYMENT_MODE=mock npm run -s env:check; then echo "mock accepted in production"; exit 1; fi
+      - name: Env gate refuses a preview that cannot prove database isolation
+        run: |
+          VERCEL_ENV=preview PRODUCTION_DB_HOSTS=prod.example.test DATABASE_URL=postgresql://u:p@preview.example.test/db npm run -s env:check
+          if VERCEL_ENV=preview PRODUCTION_DB_HOSTS=prod.example.test DATABASE_URL=postgresql://u:p@prod.example.test/db npm run -s env:check; then echo "preview on a production DB host accepted"; exit 1; fi
+          if VERCEL_ENV=preview DATABASE_URL=postgresql://u:p@preview.example.test/db npm run -s env:check; then echo "preview without PRODUCTION_DB_HOSTS accepted"; exit 1; fi
 
   full:
     name: Migrate, integration, build, API smoke (disposable Postgres)

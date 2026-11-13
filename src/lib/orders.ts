@@ -160,7 +160,7 @@ async function insertOrder(
   // GST snapshot (M7-T1): frozen now from the rates in force today; lines without a configured rate stay NULL and are filled at invoice time.
   const sellerCode = stateCode(site.address.state);
   const supply = sellerCode ? supplyTypeFor(sellerCode, stateCode(input.state)) : null;
-  const tax = supply ? await snapshotOrderTax(tx, { supply, lines: items.map((i, idx) => ({ hsCode: variants.find((v) => v.id === i.variantId)!.hsCode ?? null, amount: i.lineTotal })), deliveryFee, asOf: new Date() }) : null;
+  const tax = supply ? await snapshotOrderTax(tx, { supply, lines: items.map((i) => ({ hsCode: variants.find((v) => v.id === i.variantId)!.hsCode ?? null, amount: i.lineTotal })), deliveryFee, asOf: new Date() }) : null;
   const itemRows = items.map((i, idx) => {
     const t = tax?.lines[idx];
     return { ...i, hsCode: variants.find((v) => v.id === i.variantId)!.hsCode ?? null, ...(t ? { gstRateBp: t.rateBp, taxableValue: t.taxableValue, cgst: t.cgst, sgst: t.sgst, igst: t.igst } : {}) };

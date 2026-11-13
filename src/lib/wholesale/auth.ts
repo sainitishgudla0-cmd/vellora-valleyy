@@ -1,6 +1,5 @@
 import "server-only";
 import type { BusinessAccount } from "@prisma/client";
-import { fail } from "@/lib/api";
 import { requireCustomer, type CustomerContext } from "@/lib/auth/customer";
 import { findAccountForCustomer } from "./accounts";
 

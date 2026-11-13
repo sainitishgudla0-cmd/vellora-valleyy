@@ -21,7 +21,6 @@ import { POST as claim } from "@/app/api/account/claim/route";
 import { GET as exportData } from "@/app/api/account/export/route";
 import { DELETE as deleteAccount } from "@/app/api/account/route";
 
-type Customer = Awaited<ReturnType<typeof signInCustomer>>;
 const mk = (url: string, method: string, cookie?: string, body?: unknown, headers: Record<string, string> = {}) =>
   new Request(`http://localhost${url}`, { method, headers: { host: "localhost", ...(cookie ? { cookie } : {}), ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
 const read = async (res: Response) => ({ status: res.status, body: (await res.json()) as Record<string, any>, res });
@@ -29,7 +28,7 @@ const ctx = <T extends Record<string, string>>(p: T) => ({ params: Promise.resol
 const ADDRESS = { name: "Asha Rao", phone: "9876543210", line1: "12 MG Road", city: "Anantapur", state: "Andhra Pradesh", pincode: "515001" };
 
 let variantId: string;
-let seq = 0;
+const seq = 0;
 async function placeOrder(cookie: string | undefined, over: Record<string, unknown> = {}, headers: Record<string, string> = {}) {
   const r = await read(await createOrderRoute(mk("/api/orders", "POST", cookie, {
     customerName: "Asha Rao", email: freshEmail("guest"), phone: "9876543210", addressLine1: "12 MG Road", city: "Anantapur", state: "Andhra Pradesh", pincode: "515001",

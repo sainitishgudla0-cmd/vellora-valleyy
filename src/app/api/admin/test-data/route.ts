@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { fail, json } from "@/lib/api";
+import { json } from "@/lib/api";
 import { releaseHoldsForOrders } from "@/lib/inventory/order-stock";
 import { requireAdmin } from "@/lib/auth/admin";
 import { writeAudit } from "@/lib/auth/audit";

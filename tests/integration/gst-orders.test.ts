@@ -1,5 +1,5 @@
 /** M7-T1/T3: GST snapshot per order line at creation, rate lookup by date and HSN, shipping fee and serviceability in createOrder. */
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { createOrder, OrderError } from "@/lib/orders";
 import { cleanupInventoryFixtures, createInventoryVariant } from "../support/inventory";
