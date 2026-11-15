@@ -8,7 +8,7 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 - **Last verified:** 2026-11-13, `npm run verify:full` with `VERIFY_UI=1` on throwaway Postgres 16: all gates green (M10 evidence below).
 
 ## M11 (active) — tracker: `docs/M11-RELEASE-READINESS.md`
-- Branch `backend/m11-stabilization`. P0 audit done (F01-F20 labelled). **P1-T1 done** (F03: a status PATCH can no longer mark a gateway payment refunded; ADR 0019). Next: P1-T3 (failed online attempts never expire, F06); P1-T2 is blocked on a business decision.
+- Branch `backend/m11-stabilization`; `backend/development` @ `7448365` (CI 43686097499 green). P0 audit done (F01-F20 labelled). **P1-T1 done** (F03: a status PATCH can no longer mark a gateway payment refunded; ADR 0019). Next: P1-T3 (failed online attempts never expire, F06); P1-T2 is blocked on a business decision.
 
 ## Next up
 | Task | Status | Notes |
