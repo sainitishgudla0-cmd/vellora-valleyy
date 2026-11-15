@@ -7,8 +7,8 @@ Written for the operator (you) and for agents. Rows marked **operator** change p
 ### A1. Production baselining (M9-T1)
 Follow "Production baselining" in `RUNBOOK-DATABASE.md` step by step. Agent role: prepare and review, never run against production.
 - [ ] Neon branch `pre-baseline-YYYYMMDD` and a `pg_dump --format=custom` taken; the dump restored into a scratch DB (`npm run db:restore-drill` rehearses exactly this on a disposable copy).
-- [ ] `prisma migrate diff --from-url "$PROD_UNPOOLED" --to-migrations prisma/migrations --shadow-database-url "$SCRATCH_URL" --script` prints nothing (zero drift). Anything else: stop, write an ADR.
-- [ ] Rehearsal on the Neon branch: `migrate resolve --applied 0_init`, then `migrate deploy` applies every later migration (M2-M9, 13 of them) cleanly; read paths and a test order work on that branch.
+- [ ] Production matches the `0_init` schema: the read-only `prisma migrate diff --from-url "$PROD_UNPOOLED" --to-schema-datamodel <0_init schema> --script --exit-code` from `RUNBOOK-DATABASE.md` step 3 prints an empty migration, exit 0. Anything else: stop, write an ADR. (Not `--to-migrations`: that always differs by the later migrations, F02.)
+- [ ] Rehearsal on the Neon branch: `migrate resolve --applied 0_init`, then `migrate deploy` applies every later migration (M2-M10, 13 of them) cleanly; read paths and a test order work on that branch.
 - [ ] Production: `resolve --applied 0_init`, then `db:migrate:deploy:production` (needs `APP_ENV=production` and `CONFIRM_PRODUCTION_DB_HOST=<host>`), then `db:schema:diff` = no difference.
 - [ ] `admin:bootstrap` for the first owner; retire `ADMIN_PASSWORD` (`ADMIN_LEGACY_LOGIN=off`).
 

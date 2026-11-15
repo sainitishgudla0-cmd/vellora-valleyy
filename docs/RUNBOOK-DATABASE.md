@@ -19,16 +19,17 @@ Operator-only procedures. Agents must not run anything in the "production" secti
 ## Current state (M1)
 - `prisma/migrations/0_init` was generated **offline** from `schema.prisma` (`prisma migrate diff --from-empty`). It applies cleanly to an empty Postgres 16 and `db:schema:diff` reports no drift (verified on a throwaway DB).
 - **Production has not been baselined.** It was created with `prisma db push` and has no `_prisma_migrations` table. `prisma migrate deploy` against it fails with **P3005** (schema not empty), which is a safe failure.
-- Vercel builds no longer run `db push` or the seed. Production schema and catalogue are unchanged by deploys from M1 onward.
+- Vercel builds on `backend/development` no longer run `db push` or the seed. **Production still builds from `main`, whose `vercel-build` runs `prisma db push` and the seed on every deploy (finding F01):** do not redeploy the current production project until `main` carries the DB-free build.
 
 ## Production baselining (before the first production migration, M9 or earlier)
 1. **Freeze:** no deploys or admin edits during the window. Announce the window.
 2. **Backup:** create a Neon branch from production (instant copy-on-write) named `pre-baseline-YYYYMMDD`, and take a `pg_dump --format=custom` of the production database to secure storage. Verify the dump restores into a scratch database.
-3. **Compare:** with a direct (unpooled) production URL in a one-off shell, never in `.env`:
-   `prisma migrate diff --from-url "$PROD_UNPOOLED" --to-migrations prisma/migrations --shadow-database-url "$SCRATCH_URL" --script`
-   The output must be empty. Any difference means production drifted from the repo: stop, write an ADR, and reconcile with an explicit migration first.
-4. **Rehearse** on the Neon backup branch: `prisma migrate resolve --applied 0_init`, then `prisma migrate deploy` (should be a no-op), then run the app's read paths against it.
-5. **Baseline production:** `APP_ENV=production CONFIRM_PRODUCTION_DB_HOST=<host> prisma migrate resolve --applied 0_init` (records the baseline only; no DDL). Then `npm run db:migrate:status` must report up to date.
+3. **Compare against the baseline only (M11, F02):** production was created by `db push` from `main`'s schema, which is byte-identical to the schema `0_init` was generated from (commit `aaeb082`). Compare production with **that** schema, not with the whole migration history (which always differs by the 13 later migrations). With a direct (unpooled) production URL in a one-off shell, never in `.env`, and a temp file outside the repo:
+   `git show aaeb082:prisma/schema.prisma > "$TMPDIR/schema-0_init.prisma"`
+   `prisma migrate diff --from-url "$PROD_UNPOOLED" --to-schema-datamodel "$TMPDIR/schema-0_init.prisma" --script --exit-code`
+   Expected: `-- This is an empty migration.` and exit 0 (read-only introspection). Exit 2 means production drifted from `main`'s schema: stop, write an ADR, reconcile with an explicit migration first. (Rehearsed 2026-11-15 on a disposable DB built from `0_init`: empty, exit 0; the old full-history command printed 132 DDL statements on the same DB.)
+4. **Rehearse** on the Neon backup branch (real data): `prisma migrate deploy` must refuse with P3005; `prisma migrate resolve --applied 0_init`; `prisma migrate deploy` applies the 13 later migrations (M2-M10); `npm run db:migrate:status` up to date; `npm run db:schema:diff` no difference; run the app's read paths and a test order against it. Any data error (e.g. an unknown status string in the M2 enum cast) stops the release.
+5. **Baseline production:** `APP_ENV=production CONFIRM_PRODUCTION_DB_HOST=<host> prisma migrate resolve --applied 0_init` (records the baseline only; no DDL). `npm run db:migrate:status` then lists the 13 pending migrations; deploy them with `db:migrate:deploy:production` (section below) **before** the app version that needs them.
 6. **Rollback:** baselining writes only the `_prisma_migrations` row. Roll back by deleting that row, or by restoring the Neon backup branch.
 
 ## Future production migrations
