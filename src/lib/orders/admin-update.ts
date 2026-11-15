@@ -11,7 +11,8 @@ import { transitionOrder, validateTransition, type TransitionErrorCode } from ".
  * Admin payment edits are deliberately narrow:
  *  - unpaid -> paid: only for request-only orders (pay on delivery), with a reason and an external payment
  *    reference. Gateway and mock payments are confirmed by their providers, never by hand.
- *  - paid -> refunded: bookkeeping that a refund was made outside the system (real refunds are M10), with a reason.
+ *  - paid -> refunded: only for request-only orders, with a reason: bookkeeping that money collected outside any
+ *    gateway was returned outside it. Gateway refunds go only through `src/lib/payments/refunds.ts` (M11 P1-T1).
  *  Anything else is refused. Orders without a recorded mode (legacy) or without a payment record cannot have
  *  their payment edited here: they need operator reconciliation.
  */
@@ -29,6 +30,8 @@ export type AdminUpdateCode = TransitionErrorCode | "payment_edit_not_allowed" |
 export type AdminUpdateResult = { ok: true; changed: boolean } | { ok: false; code: AdminUpdateCode | "not_found"; message: string };
 
 const DEFAULT_REASON = "Status changed from the admin dashboard";
+const ONLINE_REFUND_MESSAGE =
+  "Online payments are refunded through the payment gateway (POST /api/admin/orders/[id]/refunds, owner accounts); a refund made in the Razorpay dashboard is recorded from the gateway automatically";
 
 class Abort extends Error {
   constructor(public result: AdminUpdateResult) {
@@ -61,14 +64,18 @@ export async function updateOrderAsAdmin(input: AdminOrderUpdate): Promise<Admin
         const manualConfirm = order.paymentStatus === "unpaid" && target === "paid";
         const refund = order.paymentStatus === "paid" && target === "refunded";
         if (!manualConfirm && !refund) throw new Abort(no("payment_edit_not_allowed", `A payment cannot be moved from ${order.paymentStatus} to ${target} by hand`));
-        if (order.paymentMode === null || order.paymentMode === "mock") {
-          throw new Abort(no("payment_edit_not_allowed", order.paymentMode === null ? "This order predates payment-mode tracking; reconcile its payment manually" : "Mock payments cannot be edited"));
+        // Hand edits exist only for money that never touched a gateway. A gateway payment is confirmed by the provider
+        // and refunded through the refund ledger (src/lib/payments/refunds.ts) or adopted from the gateway's own record,
+        // so a status edit can never claim money moved when the gateway says otherwise (M11 P1-T1, finding F03).
+        // Both the order's recorded mode and the attempt's provider must be request-only.
+        const online = manualConfirm ? "Online payments are confirmed by the payment provider, not by hand" : ONLINE_REFUND_MESSAGE;
+        if (order.paymentMode !== "request_only") {
+          throw new Abort(no("payment_edit_not_allowed", order.paymentMode === null ? "This order predates payment-mode tracking; reconcile its payment manually" : order.paymentMode === "mock" ? "Mock payments cannot be edited" : online));
         }
-        if (manualConfirm && order.paymentMode !== "request_only") throw new Abort(no("payment_edit_not_allowed", "Online payments are confirmed by the payment provider, not by hand"));
 
         const attempt = await tx.payment.findFirst({ where: { orderId: order.id, status: order.paymentStatus }, orderBy: { createdAt: "desc" } });
         if (!attempt) throw new Abort(no("no_payment_record", "This order has no payment record to update"));
-        if (manualConfirm && attempt.provider !== "request_only") throw new Abort(no("payment_edit_not_allowed", "Online payments are confirmed by the payment provider, not by hand"));
+        if (attempt.provider !== "request_only") throw new Abort(no("payment_edit_not_allowed", online));
 
         // Validate reason/reference (and the transition) before touching the Payment row.
         const invalid = validateTransition({ from: order.status, to, payment: { from: order.paymentStatus, to: target }, actor: { type: "admin", id: adminId }, reason, paymentReference: input.paymentReference });

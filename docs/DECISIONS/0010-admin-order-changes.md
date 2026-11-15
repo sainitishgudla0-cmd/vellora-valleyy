@@ -6,7 +6,7 @@
   - `updateOrderAsAdmin` (service) -> `transitionOrder` (actor `admin`, id `admin`: there is a single shared admin credential, so the event cannot name a person). Invalid transitions are `409`, missing reason/reference `422`. The route is thin and keeps `200 { ok }` / `401` / `404` / `422` for existing callers; the dashboard dropdown needed no change.
   - **Orders never become `paid` by hand** (the order graph already makes `paid` reachable only from `awaiting_payment`, and the actor rule allows only gateway/system there).
   - **Manual payment confirmation** exists for request-only orders only: payment-only change, explicit reason, an external reference matching `^[A-Za-z0-9][A-Za-z0-9 _./:-]{2,79}$`, recorded on `Payment.manualReference` (unique) and on the `OrderEvent`. A DB CHECK stops any non-request-only attempt carrying a manual reference. Gateway and mock payments cannot be confirmed by hand, which keeps the T5 rule that online payments are proven by the provider.
-  - **Refund bookkeeping** (`paid -> refunded`, reason required) records an external refund; no money moves here (M10).
+  - **Refund bookkeeping** (`paid -> refunded`, reason required) records an external refund; no money moves here (M10). Narrowed to request-only payments by ADR 0019 (M11 P1-T1).
   - The `Payment` row and the order change commit in one transaction; any failure (including the event insert) rolls both back. Conditional updates make concurrent identical requests produce one event.
   - Plain status moves get a default recorded reason so the existing dropdown keeps working; payment edits and cancelling a paid order require a human-written one.
   - The ratchet's legacy status-writer list is now empty.

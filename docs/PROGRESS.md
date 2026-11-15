@@ -7,6 +7,9 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 - **Branch:** M1 is integrated: `backend/development` fast-forwarded from `backend/m2-payments` after each task (no PR workflow); see the M2-T6 entry for the latest SHA and CI run. `main` = `55aa848`, untouched. Working copy moved to `~/Developer/Velora-Valley` (the Desktop copy is iCloud-synced and spawns duplicate files). `main` = `55aa848`, untouched.
 - **Last verified:** 2026-11-13, `npm run verify:full` with `VERIFY_UI=1` on throwaway Postgres 16: all gates green (M10 evidence below).
 
+## M11 (active) — tracker: `docs/M11-RELEASE-READINESS.md`
+- Branch `backend/m11-stabilization`. P0 audit done (F01-F20 labelled). **P1-T1 done** (F03: a status PATCH can no longer mark a gateway payment refunded; ADR 0019). Next: P1-T3 (failed online attempts never expire, F06); P1-T2 is blocked on a business decision.
+
 ## Next up
 | Task | Status | Notes |
 |---|---|---|

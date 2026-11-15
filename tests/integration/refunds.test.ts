@@ -141,18 +141,31 @@ describe("full and partial refunds", () => {
 });
 
 describe("what cannot be refunded", () => {
-  it("unknown order 404; unpaid, pay-on-delivery and already hand-marked refunded orders 409; no gateway call is made", async () => {
+  it("unknown order 404; unpaid and pay-on-delivery orders 409; no gateway call is made", async () => {
     expect((await refund("missing")).status).toBe(404);
     const unpaid = await createRazorpayOrderWithAttempt({});
     expect((await refund(unpaid.order.id)).body.code).toBe("not_refundable");
     const cod = await createFixtureOrder({ paymentMethod: "cod", paymentMode: "request_only", status: "confirmed", paymentStatus: "paid" });
     await db.payment.create({ data: { orderId: cod.id, provider: "request_only", mode: "request_only", amount: cod.total, status: "paid" } });
     expect((await refund(cod.id)).status).toBe(409);
-    const manual = await paidOrder();
-    const patched = await patchOrder(new Request("http://localhost/x", { method: "PATCH", headers: { cookie: owner.cookie }, body: JSON.stringify({ paymentStatus: "refunded", reason: "Refunded in the dashboard" }) }), { params: Promise.resolve({ id: manual.order.id }) });
-    expect(patched.status).toBe(200);
-    expect(await refund(manual.order.id)).toMatchObject({ status: 409, body: { code: "not_refundable" } });
     expect(refundCalls()).toHaveLength(0);
+  });
+
+  it("a status PATCH cannot pre-empt a gateway refund (M11 P1-T1, F03): it is refused, and the real refund still works", async () => {
+    const o = await paidOrder();
+    const patched = await patchOrder(new Request("http://localhost/x", { method: "PATCH", headers: { cookie: owner.cookie }, body: JSON.stringify({ paymentStatus: "refunded", reason: "Refunded in the dashboard" }) }), { params: Promise.resolve({ id: o.order.id }) });
+    expect(patched.status).toBe(409);
+    expect(await patched.json()).toMatchObject({ code: "payment_edit_not_allowed" });
+    expect(await load(o.order.id)).toMatchObject({ paymentStatus: "paid" });
+    expect(refundCalls()).toHaveLength(0);
+    // the money can still be returned, through the ledger and the gateway, and only then is the order refunded
+    expect((await refund(o.order.id)).status).toBe(201);
+    expect(refundCalls()).toHaveLength(1);
+    expect(await load(o.order.id)).toMatchObject({ paymentStatus: "refunded" });
+    expect((await db.orderEvent.findMany({ where: { orderId: o.order.id, toPaymentStatus: "refunded" } })).map((e) => e.actorType)).toEqual(["gateway"]);
+    // a payment that is refunded in full is never refunded again
+    expect(await refund(o.order.id)).toMatchObject({ status: 409, body: { code: "not_refundable" } });
+    expect(refundCalls()).toHaveLength(1);
   });
 
   it("a payment made under the other mode, and a non-Razorpay environment, are refused", async () => {

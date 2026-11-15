@@ -1,0 +1,81 @@
+# M11 — Stabilisation, integration and release readiness
+
+Central tracker for M11 (execution, evidence, blockers). `PROGRESS.md` points here. Operator checklists stay in `RELEASE.md`; database procedure in `RUNBOOK-DATABASE.md`. One bounded task per `/next`; each task = fix + regression test + review + evidence + checkpoint.
+
+- **Branch:** `backend/m11-stabilization` from `backend/development` @ `5225e44` (2026-11-14; origin matched, tree clean). `main` = `55aa848`, untouched.
+- **Status legend:** confirmed · partially mitigated · unverified (needs operator/external evidence) · false positive · **fixed** (with evidence).
+
+## 1. Findings (audited against `5225e44`)
+| ID | Sev | Status | Finding (evidence) | Task |
+|---|---|---|---|---|
+| F01 | Critical | confirmed | `main` `package.json` `vercel-build` = `prisma db push --skip-generate && tsx prisma/seed.ts && next build`: every production deploy of `main` mutates the DB. `backend/development` = `env:check && prisma generate && next build`. | P2-T1 |
+| F02 | High | confirmed | `RUNBOOK-DATABASE.md` "Production baselining" step 3 and `RELEASE.md` A1 diff production against `--to-migrations prisma/migrations` (all 14), which can never be empty for a pre-M2 database. Correct check: production vs the `0_init` schema only. | P2-T2 |
+| F03 | High | **fixed (P1-T1)** | `src/lib/orders/admin-update.ts` let `orders:write` (operations, legacy shared password) move a captured Razorpay payment `paid → refunded` with no gateway refund; it then blocked the real refund (`not_refundable`). Also via `{status: cancelled, paymentStatus: refunded}`. ADR 0019. | P1-T1 |
+| F04 | High | partially mitigated | Manual `unpaid → paid` is request-only, reason + unique `manualReference` (DB unique, CHECK request-only), atomic with `OrderEvent`. Gaps: held by `operations` and the legacy session (`roles.ts`, `ACCOUNT_ONLY` excludes it), no amount/method attestation, same route as status changes. Same gaps for request-only refund bookkeeping. | P1-T2 |
+| F05 | High | confirmed | `legacyLoginEnabled()` = `ADMIN_PASSWORD` set and `ADMIN_LEGACY_LOGIN≠off` (`src/lib/auth/admin.ts:40`); legacy session = owner minus `users:manage`/`refunds:write`, so it keeps `orders:write`, `catalog:write`, `tax:write`, `testdata:write`. | P1-T5 |
+| F06 | High | confirmed (code) | After `payment.failed` (`razorpay-verify.ts` `markFailed`, also webhook) the order is `awaiting_payment`/`failed`, attempt `failed`. `expireUnpaidOrders` selects only attempts `unpaid` on orders `paymentStatus: unpaid` (`expire.ts:40-45`) → stock held indefinitely. Needs the failing test first. | P1-T3 |
+| F07 | Medium-High | confirmed | `writeAudit` (`src/lib/auth/audit.ts:22-40`) swallows DB errors; mutations succeed unaudited. | P1-T4 |
+| F08 | Medium | confirmed | `rate-limit-store.ts:72-77` falls back to a per-instance Map for every caller when Postgres fails (login, OTP, refunds included). | P1-T6 |
+| F09 | High (launch) | confirmed | No OTP sender: `CUSTOMER_OTP_MODE` mock only, refused in preview/production; customer sign-in is off in production. | P3-T1 (provider = business) |
+| F10 | High (launch) | confirmed | Notifications: `currentEmailProvider()` returns the mock or null (`notify/provider.ts:50-52`); nothing is sent in production. | P3-T1 |
+| F11 | High (ops) | confirmed | `Variant.trackInventory @default(false)`; catalogue uses the manual `inStock` flag, so no oversell protection until stock is initialised. | P3-T3 |
+| F12 | Medium | confirmed | No active `ShippingRule` = every pincode serviceable at the legacy fee (ADR 0015). | P3-T4 |
+| F13 | High | confirmed | `vercel.json` has no `crons`; expiry, reconciliation and outbox dispatch never run in Vercel. | P3-T5 |
+| F14 | High (legal) | confirmed | No `TaxRate` rows or `SELLER_GSTIN`; rounding, IRN applicability, credit notes unbuilt/unapproved. | P3-T6 (accountant) |
+| F15 | Medium | confirmed | Linux CI skips the 22 visual comparisons (baselines are macOS-local, gitignored). | P5-T3 |
+| F16 | High | unverified | Preview/production DB isolation: code gate exists (`env:check`, ADR 0017); Vercel scopes not inspected. | P6-T1 (operator) |
+| F17 | Medium | unverified | Branch protection on `main`/`backend/development` not inspected (GitHub connector failed this session). | P6-T1 (operator) |
+| F18 | Medium | confirmed | `/account` is linked from no page (only `src/app/account/orders/[number]/page.tsx` links back). Account/wholesale journeys only proven by Playwright on direct URLs. | P4-T1 (design approval) |
+| F19 | High | unverified | Monitoring vendor, uptime check, production restore drill, RPO/RTO sign-off: none evidenced. | P7-T2 (operator) |
+| F20 | High | unverified | Refund/webhook/reconcile behaviour proven only against `tests/support/fake-razorpay.ts`. | P6-T2 |
+| N01 | Low | confirmed | `ARCHITECTURE.md` still says "State as of M1" and describes the shared-password admin; docs drift only. | P4-T4 |
+
+## 2. Phases and tasks
+Each task: implementation, regression test (failing first where practical), disposable-Postgres integration for transactional paths, `npm run verify`, review, commit, CI, fast-forward. Milestone gates (`verify:full` + `VERIFY_UI=1`) at the end of P1, P3, P5.
+
+**P0 — Baseline and risk validation** (done 2026-11-14): repo/remote/SHA verified, branch created, findings table above. AC: every lead labelled with file evidence. 
+
+**P1 — Financial integrity and critical security** (depends P0)
+| Task | Deliverable | Tests / AC | Status |
+|---|---|---|---|
+| P1-T1 | No hand-marked gateway refunds (F03) | gateway `paid→refunded` PATCH = 409 for owner/operations/legacy, test+live, combined change; real refund still works; request-only bookkeeping unchanged | **done** (evidence §4) |
+| P1-T2 | Dedicated offline-collection operation (F04): own permission (owner or new `payments:record`, never legacy), amount = order total, method, unique reference, reason, immutable record, transactional; request-only refund bookkeeping moved under it | role matrix, amount mismatch, duplicate reference under concurrency, rollback injection | blocked on business: who may record offline collections/refunds; whether offline refunds of gateway payments are ever allowed |
+| P1-T3 | Failed online attempts expire and release stock (F06), without touching captured/authorised payments or a legitimate retry | failing test first: `failed` attempt past window → cancelled + stock released; gateway shows captured → paid, not cancelled; retry in window untouched; concurrent expiry+webhook | pending |
+| P1-T4 | Audit classes (F07): critical mutations (refund, payment record, role/user change) write audit in the same transaction or fail closed; others keep best-effort + log | injected audit-insert failure rolls the critical change back | pending |
+| P1-T5 | Legacy login retirement path (F05): document bootstrap → `ADMIN_LEGACY_LOGIN=off`; `env:check` refuses production with legacy on once an owner exists (or launch gate); owner recovery = `admin:bootstrap --reset` | env gate unit tests; legacy denied financial permissions | pending |
+| P1-T6 | Rate limiter fail-closed for auth/OTP/payment/refund/privileged routes (F08), fail-open per-instance only for public reads | DB-down test per class | pending |
+
+**P2 — Migrations and deployment safety** (depends P0; independent of P1)
+| P2-T1 | Safe transition off `main`'s DB-mutating build (F01): a minimal `main`-compatible change set (build script only) prepared on a branch for the user to promote; no merge of the backend | build never connects for writes (static check + build run against a read-only role) | pending (user promotes `main`) |
+| P2-T2 | Corrected baselining procedure (F02): diff production vs `0_init` (`--to-schema-datamodel` at the `0_init` schema), drift handling, rehearsal on a Neon clone (resolve `0_init` → deploy 13 → app read/write smoke) | rehearsal script against a disposable DB seeded with `main`'s `db push` schema | pending |
+| P2-T3 | Release compatibility matrix: app version vs migration level, rollback order | doc + migration-order test | pending |
+
+**P3 — Business services and configuration** (depends P1)
+P3-T1 email/OTP provider adapter behind outbox (F09/F10; provider choice = business, DLT for SMS) · P3-T2 notification failure handling/dead-letter admin view (API) · P3-T3 stock initialisation tooling + launch check that tracked variants are initialised (F11) · P3-T4 shipping rules required in production (or explicit opt-out) (F12) · P3-T5 `vercel.json` crons + auth for expiry, reconcile, outbox (F13; plan limits confirmed by operator) · P3-T6 tax data import + invoice behaviour sign-off pack for the accountant; credit notes scoped (F14). Each blocked item records its blocker.
+
+**P4 — Frontend/backend integration and staff usability** (depends P3; UI changes need explicit approval)
+P4-T1 link `/account` from the storefront (F18, design approval) · P4-T2 admin UI for refunds and offline collections (uses P1-T2/P1-T1 APIs) · P4-T3 admin stock/shipping/tax screens or documented API runbook · P4-T4 docs refresh (N01).
+
+**P5 — Security, reliability, regression and performance** (depends P4)
+P5-T1 acceptance scenarios (§3) as Playwright + integration · P5-T2 failure-recovery suite (duplicate submit, gateway outage, DB rollback, email failure) · P5-T3 Linux visual baselines in CI (F15) · P5-T4 security review (`/security-review`), load test of checkout and stock contention.
+
+**P6 — Staging with real providers** (depends P5; operator authorisation for each external step)
+P6-T1 Vercel preview isolation + branch protection evidence (F16/F17) · P6-T2 Razorpay test-mode run: pay, fail, retry, webhook, duplicate webhook, full/partial refund, dashboard refund adoption, reconcile (F20; `RELEASE.md` E1) · P6-T3 real email/OTP delivery in staging · P6-T4 migration rehearsal on a production clone (P2-T2).
+
+**P7 — Production launch and handover** (depends P6; user authorises every step)
+P7-T1 baselining + migrations (operator) · P7-T2 monitoring/alerting, restore drill, RPO/RTO (F19) · P7-T3 promote `main`, deploy, smoke, rollback rehearsal · P7-T4 staff handover: daily operating scenarios run by staff.
+
+## 3. Acceptance scenarios (P5)
+Retail (browse → cart → stock check → delivery quote → order → pay → confirm → dispatch → deliver → invoice + notifications) · Guest (order → token view → track → claim after sign-in) · Customer (OTP → addresses → orders → invoices → export/erasure) · Wholesale (apply → approve → price list → MOQ → quote → price → accept → order → credit check → GST invoice) · Admin (sign in → products/stock → confirm → offline collection → ship → audit → invoice → authorised refund → reconciliation exception) · Failure (duplicate submit, failed payment, browser drop, gateway outage, cancel, shortage, expired quote, email failure, duplicate webhook, DB rollback).
+
+## 4. Production acceptance gates
+All must have evidence; CI green alone is never enough. ☐ all High findings fixed or safely blocked · ☐ no unauthorised financial-state change (P1) · ☐ ledger/order/event consistent under concurrency · ☐ no oversell with tracking initialised · ☐ failed/expired orders release stock · ☐ retail/wholesale/guest/registered journeys through the UI · ☐ real email/OTP · ☐ staff-confirmed shipping rules · ☐ accountant-approved tax/invoices · ☐ protected, running scheduled jobs · ☐ no DB writes during build · ☐ migrations rehearsed on a production clone · ☐ restore + app rollback rehearsed · ☐ CI incl. substantive browser/visual checks · ☐ Razorpay test-mode pay/webhook/refund journeys · ☐ preview/production isolation verified by operator · ☐ monitoring and alerting · ☐ staff run daily scenarios unaided.
+
+## 5. Task log
+### P1-T1 — no hand-marked gateway refunds (F03), 2026-11-14
+- **Failure:** an operations user or the shared admin password could set a captured Razorpay payment to `refunded` with a reason; no money moved, the customer was told nothing reliable, and the owner could then no longer refund it (`not_refundable`).
+- **Root cause:** `updateOrderAsAdmin` applied the request-only restriction to `unpaid → paid` only; `paid → refunded` checked only "not mock, not legacy".
+- **Fix:** `src/lib/orders/admin-update.ts`: both edits require order `paymentMode = request_only` **and** attempt `provider = request_only`; otherwise `409 payment_edit_not_allowed` (existing code and status). Gateway payments reach `refunded` only via `refunds.ts` (`settleFullRefund`, actor `gateway`). No schema or UI change. ADR 0019; contracts updated.
+- **Tests:** `tests/integration/admin-orders.test.ts` (request-only bookkeeping still 200; owner/operations/legacy × `razorpay_test`/`razorpay_live` → 409, order/payment unchanged, no `OrderEvent`, no `Refund`, audit `rejected` with the code; combined cancel+refund; request-only order with a gateway attempt), `tests/integration/refunds.test.ts` (PATCH refused, then the owner refund succeeds and the only `→ refunded` event has actor `gateway`). Pre-fix: 3 failed / 44 passed. Mutation: removing the attempt-provider guard fails 1 test.
+- **Security/concurrency:** no new write path; the refused path writes nothing (checks run before any update in the transaction); owner-only `refunds:write` and the ledger row lock are unchanged and still covered by `refunds.test.ts` (authorisation, parallel requests).
+- **Evidence and CI:** see `PROGRESS.md` M11 entry.

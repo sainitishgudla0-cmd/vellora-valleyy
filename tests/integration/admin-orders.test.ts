@@ -1,7 +1,7 @@
 /** M2-T6: admin PATCH through the real route, state machine and Postgres. */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
-import { cleanupAdminFixtures, createTestAdmin } from "../support/admin";
+import { cleanupAdminFixtures, createLegacySession, createTestAdmin } from "../support/admin";
 import { cleanupFixtures, createFixtureOrder, createMockOrderWithAttempt, createRazorpayOrderWithAttempt } from "../support/mock-orders";
 
 import { PATCH } from "@/app/api/admin/orders/[id]/route";
@@ -188,7 +188,7 @@ describe("manual payment confirmation (request-only orders)", () => {
 });
 
 describe("recording refunds made outside the system", () => {
-  it("paid → refunded needs a reason, updates the attempt and records the event (request-only and gateway orders)", async () => {
+  it("paid → refunded on a request-only order needs a reason, updates the attempt and records the event", async () => {
     const cod = await codOrder("delivered", "paid");
     expect((await patch(cod.id, { paymentStatus: "refunded" })).status).toBe(422);
     expect((await patch(cod.id, { paymentStatus: "refunded", reason: "Refunded in cash at the counter" })).status).toBe(200);
@@ -197,11 +197,48 @@ describe("recording refunds made outside the system", () => {
     expect((await events(cod.id))[0]).toMatchObject({ fromPaymentStatus: "paid", toPaymentStatus: "refunded", actorType: "admin", paymentReference: null });
     // a refunded payment is terminal
     expect((await patch(cod.id, { paymentStatus: "paid", reason: "oops", paymentReference: "RCPT-AGAIN-1" })).status).toBe(409);
+  });
 
-    const rz = await createRazorpayOrderWithAttempt({ status: "paid", paymentStatus: "paid" });
-    await db.payment.update({ where: { id: rz.attempt.id }, data: { status: "paid", providerPaymentId: "pay_fixture_1" } });
-    expect((await patch(rz.order.id, { paymentStatus: "refunded", reason: "Refunded from the Razorpay dashboard" })).status).toBe(200);
-    expect((await load(rz.order.id)).payments[0].status).toBe("refunded");
+  // M11 P1-T1 (finding F03): a status PATCH must never record a gateway refund that the gateway has not reported.
+  // Gateway refunds go through POST /api/admin/orders/[id]/refunds (owner accounts) or are adopted from the gateway
+  // (refund webhook / reconciliation audit), which is the only evidence that the money went back.
+  async function capturedGatewayOrder(mode: "razorpay_test" | "razorpay_live") {
+    const rz = await createRazorpayOrderWithAttempt({ mode, status: "paid", paymentStatus: "paid" });
+    await db.payment.update({ where: { id: rz.attempt.id }, data: { status: "paid", providerPaymentId: `pay_fixture_${mode}_${rz.order.number.slice(-6).replace(/\W/g, "")}` } });
+    return rz;
+  }
+
+  it("refuses to mark a captured gateway payment refunded by hand, for every role that holds orders:write", async () => {
+    const operations = await createTestAdmin("operations");
+    const legacy = await createLegacySession();
+    for (const mode of ["razorpay_test", "razorpay_live"] as const) {
+      for (const who of [admin.cookie, operations.cookie, legacy.cookie]) {
+        cookie = who;
+        const rz = await capturedGatewayOrder(mode);
+        const r = await patch(rz.order.id, { paymentStatus: "refunded", reason: "Refunded from the Razorpay dashboard" });
+        expect(r).toMatchObject({ status: 409, body: { code: "payment_edit_not_allowed" } });
+        const after = await load(rz.order.id);
+        expect(after).toMatchObject({ status: "paid", paymentStatus: "paid" });
+        expect(after.payments[0]).toMatchObject({ status: "paid" });
+        expect(await events(rz.order.id)).toHaveLength(0);
+        expect(await db.refund.count({ where: { orderId: rz.order.id } })).toBe(0);
+        const audit = await db.auditLog.findFirstOrThrow({ where: { action: "order.update", targetId: rz.order.id }, orderBy: { createdAt: "desc" } });
+        expect(audit.outcome).toBe("rejected");
+        expect(JSON.parse(audit.details!)).toMatchObject({ paymentStatus: "refunded", code: "payment_edit_not_allowed" });
+      }
+    }
+  });
+
+  it("refuses it combined with a status change, and when a request-only order carries a gateway attempt", async () => {
+    const rz = await capturedGatewayOrder("razorpay_test");
+    expect((await patch(rz.order.id, { status: "cancelled", paymentStatus: "refunded", reason: "Customer cancelled" })).body.code).toBe("payment_edit_not_allowed");
+    expect(await load(rz.order.id)).toMatchObject({ status: "paid", paymentStatus: "paid" });
+
+    // defence in depth: the attempt's provider decides, not only the order's recorded mode
+    const odd = await createFixtureOrder({ paymentMethod: "cod", paymentMode: "request_only", status: "delivered", paymentStatus: "paid" });
+    await db.payment.create({ data: { orderId: odd.id, provider: "razorpay", mode: "razorpay_test", amount: odd.total, currency: "INR", status: "paid", providerPaymentId: `pay_fixture_odd_${odd.number.slice(-6).replace(/\W/g, "")}` } });
+    expect((await patch(odd.id, { paymentStatus: "refunded", reason: "Refunded in cash" })).body.code).toBe("payment_edit_not_allowed");
+    expect((await load(odd.id)).payments[0].status).toBe("paid");
   });
 });
 
