@@ -59,5 +59,5 @@ When the owner decides the order:
 - The first cutover is a short ordering outage and rolling back to `main` needs the pre-cutover database (F22).
 - Refund, webhook and reconciliation behaviour is proven only against the fake gateway until the test-mode run (F20).
 - Rate-limit keys use the first `X-Forwarded-For` hop: correct behind Vercel's proxy, spoofable if the app is ever served without it.
-- Wholesale administration (applications, price lists, quotes) has no admin screens yet (API only).
+- Wholesale price lists, quantity tiers and MOQ have no admin screens (API only); accounts and quotes do.
 - Accessibility: colour contrast and keyboard order were not machine-checked.

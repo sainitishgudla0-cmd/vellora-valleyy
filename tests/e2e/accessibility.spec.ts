@@ -10,7 +10,7 @@ import { adminApi, BASE, hasOwner } from "./support/env";
 import { DESKTOP, newContext, settle } from "./support/page";
 
 const STOREFRONT = ["/", "/shop", "/product/premium-cashews", "/our-story", "/quality", "/business", "/contact", "/cart", "/checkout", "/account"];
-const ADMIN = ["/admin?tab=orders", "/admin?tab=products", "/admin?tab=operations", "/admin?tab=settings", "/admin?tab=account"];
+const ADMIN = ["/admin?tab=orders", "/admin?tab=products", "/admin?tab=operations", "/admin?tab=settings", "/admin?tab=wholesale", "/admin?tab=account"];
 
 async function audit(page: Page) {
   return page.evaluate(() => {

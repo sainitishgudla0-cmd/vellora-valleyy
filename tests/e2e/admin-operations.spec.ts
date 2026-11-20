@@ -4,6 +4,7 @@
  * (shipping rule add/remove). Every action goes through the real audited API. Leaves the shared database as it found it.
  */
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { gstinCheckChar } from "../../src/lib/wholesale/gstin";
 import { adminApi, BASE, closeDb, db, ensureIllustrativeTaxRates, hasOwner, must, stamp } from "./support/env";
 import { DESKTOP, newContext, watchErrors } from "./support/page";
 
@@ -135,6 +136,29 @@ test("operations tab: readiness checks and the payments-needing-a-person section
   await expect(page.getByTestId("readiness-list").locator('li[data-status="ok"]').first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Payments needing a person" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Low stock" })).toBeVisible();
+});
+
+test("wholesale tab: approve a pending business account and price its quote request", async () => {
+  const letters = Array.from({ length: 5 }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join("");
+  const body = `37${letters}${String(Math.floor(Math.random() * 9000) + 1000)}B1Z`;
+  const company = `SMOKE TEST Traders ${stamp()}`;
+  const account = await db().businessAccount.create({ data: { companyName: company, gstin: body + gstinCheckChar(body), contactName: "SMOKE TEST Buyer", contactEmail: `smoke.wholesale-${stamp()}@example.com`, phone: "9876543210", status: "pending" } });
+  const v = await db().variant.findFirstOrThrow({ where: { product: { active: true } }, orderBy: { sku: "asc" } });
+  const quote = await db().quote.create({ data: { number: `QT-E2E-${stamp().toUpperCase()}`, businessAccountId: account.id, items: { create: [{ variantId: v.id, productName: "E2E product", variantLabel: v.label, sku: v.sku, quantity: 20 }] } } });
+
+  await page.goto("/admin?tab=wholesale");
+  const card = page.getByTestId("business-account").filter({ hasText: company });
+  await card.getByRole("button", { name: "Approve" }).click();
+  await expect(page.getByTestId("business-account").filter({ hasText: company })).toContainText("approved");
+
+  const row = page.getByTestId("quote-row").filter({ hasText: quote.number });
+  await row.getByLabel(/Unit price for/).fill(((v.mrp - 100) / 100).toFixed(2));
+  await row.getByRole("button", { name: "Send quote" }).click();
+  await expect(page.getByTestId("quote-row").filter({ hasText: quote.number })).toContainText("quoted");
+  const after = await db().quote.findUniqueOrThrow({ where: { id: quote.id }, include: { items: true } });
+  expect(after.status).toBe("quoted");
+  expect(after.items[0].unitPrice).toBe(v.mrp - 100);
+  expect((await db().businessAccount.findUniqueOrThrow({ where: { id: account.id } })).status).toBe("approved");
 });
 
 test("settings tab: add a shipping rule, see it, then delete it (serviceability is restored)", async () => {

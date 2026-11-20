@@ -15,6 +15,8 @@ import { collectReadiness, listPaymentExceptions } from "@/lib/ops/readiness";
 import { listLowStock } from "@/lib/inventory/adjust";
 import { OutboxRetryButton, StockEditor } from "@/components/admin/OrderOps";
 import { ShippingRuleActions, ShippingRuleForm, TaxRateForm } from "@/components/admin/SettingsControls";
+import { AccountActions, QuotePricing } from "@/components/admin/WholesaleControls";
+import { ACCOUNT_TRANSITIONS } from "@/lib/wholesale/accounts";
 
 export const metadata: Metadata = { title: "Admin", robots: { index: false, follow: false } };
 export const dynamic = "force-dynamic";
@@ -33,7 +35,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   const admin = await currentAdmin();
   if (!admin) return <AdminLogin emailRequired={!legacyLoginEnabled()} />;
 
-  const tabs: readonly string[] = [...BASE_TABS, ...(admin.can("fulfilment:read") ? ["settings"] : []), "account", ...(admin.can("users:manage") ? ["team"] : [])];
+  const tabs: readonly string[] = [...BASE_TABS, ...(admin.can("wholesale:read") ? ["wholesale"] : []), ...(admin.can("fulfilment:read") ? ["settings"] : []), "account", ...(admin.can("users:manage") ? ["team"] : [])];
   const tab = tabs.includes(sp.tab ?? "") ? sp.tab! : "orders";
   const [orders, enquiries, products, subs, newOrders, newEnq, testOrders, testEnq, testSubs] = await Promise.all([
     tab === "orders" ? db.order.findMany({ orderBy: { createdAt: "desc" }, include: { items: true }, take: 100 }) : Promise.resolve([]),
@@ -239,6 +241,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
 
       {tab === "operations" && <OperationsTab admin={admin} />}
       {tab === "settings" && admin.can("fulfilment:read") && <SettingsTab admin={admin} />}
+      {tab === "wholesale" && admin.can("wholesale:read") && <WholesaleTab admin={admin} />}
       {tab === "account" && <AccountTab admin={admin} />}
       {tab === "team" && admin.can("users:manage") && <TeamTab currentUserId={admin.userId} />}
     </div>
@@ -345,6 +348,81 @@ async function OperationsTab({ admin }: { admin: Admin }) {
             ))}
           </ul>
         )}
+      </section>
+    </div>
+  );
+}
+
+/** M11 P4: business accounts (approve, terms, price list) and quote requests (price or reject). Price lists and MOQ stay API-only. */
+async function WholesaleTab({ admin }: { admin: Admin }) {
+  const [accounts, quotes, priceLists] = await Promise.all([
+    db.businessAccount.findMany({ orderBy: [{ status: "asc" }, { createdAt: "desc" }], take: 200, include: { priceList: { select: { name: true } } } }),
+    db.quote.findMany({ where: { status: { in: ["requested", "quoted"] } }, orderBy: { createdAt: "asc" }, take: 100, include: { businessAccount: { select: { companyName: true } }, items: { include: { variant: { select: { mrp: true } } } } } }),
+    db.priceList.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+  ]);
+  const write = admin.can("wholesale:write");
+  return (
+    <div className="mt-6 space-y-10 text-[13px]">
+      <section aria-labelledby="h-accounts">
+        <h2 id="h-accounts" className="text-[15px] font-medium">
+          Business accounts
+        </h2>
+        {accounts.length === 0 ? (
+          <p className="mt-2 text-forest/60">No applications yet.</p>
+        ) : (
+          <ul className="mt-3 space-y-4">
+            {accounts.map((a) => (
+              <li key={a.id} className="rounded-[12px] border border-forest/15 bg-cream-light p-4" data-testid="business-account">
+                <p>
+                  <span className="font-medium">{a.companyName}</span> · GSTIN {a.gstin} · <span className="uppercase tracking-wider text-[11px]">{a.status}</span>
+                </p>
+                <p className="text-forest/70">
+                  {a.contactName} · {a.contactEmail} · {a.phone} · {a.paymentTerms}
+                  {a.paymentTerms === "credit" ? ` (limit ${formatPrice(a.creditLimit)})` : ""} · {a.priceList?.name ?? "retail prices"}
+                </p>
+                {a.message && <p className="mt-1 whitespace-pre-wrap text-forest/70">“{a.message}”</p>}
+                {write && (
+                  <div className="mt-3">
+                    <AccountActions id={a.id} next={[...ACCOUNT_TRANSITIONS[a.status]]} priceLists={priceLists} priceListId={a.priceListId} paymentTerms={a.paymentTerms} creditLimitPaise={a.creditLimit} />
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section aria-labelledby="h-quotes">
+        <h2 id="h-quotes" className="text-[15px] font-medium">
+          Open quote requests
+        </h2>
+        {quotes.length === 0 ? (
+          <p className="mt-2 text-forest/60">None.</p>
+        ) : (
+          <ul className="mt-3 space-y-4">
+            {quotes.map((q) => (
+              <li key={q.id} className="rounded-[12px] border border-forest/15 bg-cream-light p-4" data-testid="quote-row">
+                <p>
+                  <span className="font-medium">{q.number}</span> · {q.businessAccount.companyName} · <span className="uppercase tracking-wider text-[11px]">{q.status}</span>
+                  {q.status === "quoted" && q.total !== null && ` · ${formatPrice(q.total)} until ${q.validUntil?.toLocaleDateString("en-IN")}`}
+                </p>
+                {q.requestNote && <p className="text-forest/70">“{q.requestNote}”</p>}
+                {q.status === "requested" && write ? (
+                  <QuotePricing id={q.id} items={q.items.map((i) => ({ variantId: i.variantId, label: `${i.productName} (${i.variantLabel})`, quantity: i.quantity, mrpPaise: i.variant.mrp }))} />
+                ) : (
+                  <ul className="mt-1 text-forest/70">
+                    {q.items.map((i) => (
+                      <li key={i.id}>
+                        {i.quantity} × {i.productName} ({i.variantLabel}){i.unitPrice !== null ? ` at ${formatPrice(i.unitPrice)}` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="mt-3 text-[12px] text-forest/60">Price lists, tiers and minimum order quantities are managed through the admin API for now (API-CONTRACTS.md, Wholesale).</p>
       </section>
     </div>
   );

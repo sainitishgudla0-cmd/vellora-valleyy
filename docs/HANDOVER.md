@@ -41,7 +41,7 @@ On the order page, *Refund*: reason, amount (empty = everything still refundable
 **Settings** → *GST rates*: only rates the accountant has approved, per HSN code and start date (they cannot be edited, only superseded by a later date). The accountant's checklist: `RELEASE.md` A9.
 
 ## Wholesale
-Business applications, price lists and quotes are handled through the admin API today (`API-CONTRACTS.md` "Wholesale"); screens for them are a follow-up.
+**Wholesale** tab (owner, operations): each business application shows company, GSTIN and contact. Set the price list, payment terms (prepaid or credit with a limit) and *Approve*, or *Reject*; approved accounts can be suspended or closed later. *Open quote requests*: enter a unit price per line (never above MRP), an optional delivery fee and validity, then *Send quote*; the buyer accepts it in their account. Price lists, quantity tiers and minimum order quantities are still set through the admin API (`API-CONTRACTS.md` "Wholesale").
 
 ## When something looks wrong
 - A customer says they paid but the order shows unpaid: check *Payments needing a person*; wait 15 minutes for reconciliation; if still unpaid, tell the operator with the order number (never mark it paid by hand: online payments are confirmed by the gateway only).
