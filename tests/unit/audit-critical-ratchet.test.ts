@@ -39,6 +39,7 @@ describe("critical audit ratchet", () => {
       "user.update": "src/lib/auth/users.ts",
       "user.password_reset": "src/lib/auth/users.ts",
       "password.change": "src/lib/auth/users.ts",
+      "owner.recover": "src/lib/auth/users.ts",
     };
     expect(Object.keys(owners).sort()).toEqual([...CRITICAL_AUDIT_ACTIONS].sort());
     for (const [action, file] of Object.entries(owners)) {

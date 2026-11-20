@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import type { AdminRole } from "@prisma/client";
 import { db } from "@/lib/db";
 import { fail } from "@/lib/api";
+import { resolveAppEnv } from "@/lib/env/app-env";
 import { allowedOriginsFromEnv, isMutation, isSameOrigin } from "./origin";
 import { hasPermission, type Permission } from "./roles";
 import { writeAudit } from "./audit";
@@ -36,8 +37,20 @@ export interface AdminContext {
 /** Cookie signing key. Required: it keys the session-token hash. */
 export const adminConfigured = () => (process.env.SESSION_SECRET ?? "").length >= MIN_SECRET;
 
-/** The shared-password login is a transition aid: on while ADMIN_PASSWORD is set, off with ADMIN_LEGACY_LOGIN=off. */
-export const legacyLoginEnabled = () => !!process.env.ADMIN_PASSWORD && process.env.ADMIN_LEGACY_LOGIN?.trim().toLowerCase() !== "off";
+/**
+ * The shared-password login is a transition aid for non-production environments: on while ADMIN_PASSWORD is set, off with
+ * ADMIN_LEGACY_LOGIN=off, and ALWAYS off in production (M11 P1-T5): production staff use individual accounts, the first
+ * owner is created and recovered with `npm run admin:bootstrap`. An environment that cannot be resolved counts as
+ * production (fail closed).
+ */
+export const legacyLoginEnabled = () => {
+  if (!process.env.ADMIN_PASSWORD || process.env.ADMIN_LEGACY_LOGIN?.trim().toLowerCase() === "off") return false;
+  try {
+    return resolveAppEnv() !== "production";
+  } catch {
+    return false;
+  }
+};
 
 const tokenHash = (token: string) => {
   const key = process.env.SESSION_SECRET;

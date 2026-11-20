@@ -143,19 +143,26 @@ async function main() {
   console.log("\nAdmin");
   check("admin PATCH without session → 401", (await req(`/api/admin/variants/${v1.id}`, { method: "PATCH", json: { price: 1 } })).status === 401);
   check("admin wrong password → 401", (await req("/api/admin/login", { method: "POST", json: { password: "wrong-password" } })).status === 401);
-  if (process.env.ADMIN_PASSWORD) {
-    const login = await req("/api/admin/login", { method: "POST", json: { password: process.env.ADMIN_PASSWORD } });
+  // One admin login only (the login limiter is shared with the browser tests): an owner account when verify:full made one,
+  // otherwise the shared password, whose session is read-only since M11 P1-T5.
+  const ownerLogin = process.env.SMOKE_ADMIN_EMAIL && process.env.SMOKE_ADMIN_PASSWORD ? { email: process.env.SMOKE_ADMIN_EMAIL, password: process.env.SMOKE_ADMIN_PASSWORD } : null;
+  if (ownerLogin || process.env.ADMIN_PASSWORD) {
+    const login = await req("/api/admin/login", { method: "POST", json: ownerLogin ?? { password: process.env.ADMIN_PASSWORD } });
     const cookie = login.headers.get("set-cookie")?.split(";")[0] ?? "";
-    check("admin login sets session cookie", login.status === 200 && cookie.startsWith("vv_admin="));
+    check(`admin login sets session cookie (${ownerLogin ? "owner account" : "shared password"})`, login.status === 200 && cookie.startsWith("vv_admin="));
     const original = v1.price / 100;
     const upd = await req(`/api/admin/variants/${v1.id}`, { method: "PATCH", json: { price: original + 1 }, headers: { cookie } });
     const after = await req("/api/products/premium-cashews");
-    check("admin price edit reflected in catalogue", upd.status === 200 && after.body.product.variants[0].price === (original + 1) * 100);
-    await req(`/api/admin/variants/${v1.id}`, { method: "PATCH", json: { price: original }, headers: { cookie } });
+    if (ownerLogin) {
+      check("admin price edit reflected in catalogue", upd.status === 200 && after.body.product.variants[0].price === (original + 1) * 100);
+      await req(`/api/admin/variants/${v1.id}`, { method: "PATCH", json: { price: original }, headers: { cookie } });
+    } else {
+      check("shared-password session cannot change prices (403, unchanged)", upd.status === 403 && after.body.product.variants[0].price === original * 100, upd.status);
+    }
     const ord = await req("/admin?tab=orders", { headers: { cookie } });
     check("admin dashboard lists the test order", ord.status === 200 && String(ord.body).includes(number));
   } else {
-    console.log("  (skipping authenticated admin checks — ADMIN_PASSWORD not set)");
+    console.log("  (skipping authenticated admin checks — no owner account or ADMIN_PASSWORD)");
   }
 
   console.log("\nCustomer accounts");

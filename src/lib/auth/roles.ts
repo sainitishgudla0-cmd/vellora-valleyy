@@ -31,10 +31,15 @@ export const ROLE_PERMISSIONS: Readonly<Record<AdminRoleName, readonly Permissio
   viewer: ["admin:read"],
 };
 
-/** Permissions that only a real account may hold: the shared-password (legacy) session never gets them. */
-const ACCOUNT_ONLY: readonly Permission[] = ["users:manage", "refunds:write"];
+/**
+ * What the shared-password (legacy) session may still do (M11 P1-T5, finding F05, ADR 0022): read, and answer
+ * enquiries. It is one password shared by everyone and its actions cannot be attributed to a person, so it never
+ * changes orders or payments, prices, stock, tax, invoices, shipments, wholesale terms, accounts or test data. Those
+ * need an individual account. The legacy login itself is always off in production (`legacyLoginEnabled`).
+ */
+export const LEGACY_SESSION_PERMISSIONS: readonly Permission[] = ["admin:read", "enquiries:write", "wholesale:read", "fulfilment:read"];
 
 export function hasPermission(role: AdminRoleName, permission: Permission, legacy = false): boolean {
-  if (legacy && ACCOUNT_ONLY.includes(permission)) return false;
+  if (legacy && !LEGACY_SESSION_PERMISSIONS.includes(permission)) return false;
   return ROLE_PERMISSIONS[role]?.includes(permission) ?? false;
 }

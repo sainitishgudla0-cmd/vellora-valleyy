@@ -27,7 +27,7 @@ export interface AuditEntry {
 }
 
 /** Actions whose successful outcome is only ever recorded in the same transaction as the change (`writeAuditTx`). */
-export const CRITICAL_AUDIT_ACTIONS = ["order.update", "order.refund.requested", "user.create", "user.update", "user.password_reset", "password.change"] as const;
+export const CRITICAL_AUDIT_ACTIONS = ["order.update", "order.refund.requested", "user.create", "user.update", "user.password_reset", "password.change", "owner.recover"] as const;
 export type CriticalAuditAction = (typeof CRITICAL_AUDIT_ACTIONS)[number];
 
 /** Who performed a critical change: an admin context, or a named operator script (e.g. `admin:bootstrap`). */

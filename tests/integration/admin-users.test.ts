@@ -291,7 +291,9 @@ describe("owner bootstrap and recovery script", () => {
     expect((await me(mk("/api/admin/me", "GET", o.cookie))).status).toBe(401);
     expect((await login(mk("/api/admin/login", "POST", undefined, { email: o.email, password: o.password }))).status).toBe(401);
     expect((await login(mk("/api/admin/login", "POST", undefined, { email: o.email, password: NEW }))).status).toBe(200);
-    expect((await audit("owner.password_reset")).length).toBe(1);
+    const rec = await audit("owner.recover");
+    expect(rec).toHaveLength(1);
+    expect(JSON.parse(rec[0].details!)).toMatchObject({ reactivated: true, sessionsRevoked: 1 });
     const notOwner = await createTestAdmin("viewer");
     expect(run(["--reset", "--email", notOwner.email], NEW).status).toBe(1); // only owners can be recovered this way
     expect(run(["--reset", "--email", `ghost@${FIXTURE_EMAIL_DOMAIN}`], NEW).status).toBe(1);

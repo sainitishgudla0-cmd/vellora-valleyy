@@ -15,11 +15,10 @@ describe("role × permission matrix", () => {
     for (const p of PERMISSIONS) expect(hasPermission(role, p), `${role} ${p}`).toBe(EXPECTED[role].includes(p));
     expect([...ROLE_PERMISSIONS[role]].sort()).toEqual([...EXPECTED[role]].sort());
   });
-  it("the shared-password (legacy) session never manages users or moves money, whatever role it carries", () => {
-    expect(hasPermission("owner", "users:manage", true)).toBe(false);
-    expect(hasPermission("owner", "refunds:write", true)).toBe(false);
+  it("the shared-password (legacy) session may only read and answer enquiries, whatever role it carries (M11 P1-T5)", () => {
     expect(hasPermission("operations", "refunds:write")).toBe(false);
-    expect(hasPermission("owner", "orders:write", true)).toBe(true);
+    for (const p of PERMISSIONS) expect(hasPermission("owner", p, true), p).toBe(["admin:read", "enquiries:write", "wholesale:read", "fulfilment:read"].includes(p));
+    expect(hasPermission("owner", "orders:write", false)).toBe(true); // a real owner account keeps everything
   });
   it("an unknown role has no permissions", () => {
     expect(hasPermission("intern" as AdminRoleName, "admin:read")).toBe(false);

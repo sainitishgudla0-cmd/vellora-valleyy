@@ -77,6 +77,29 @@ export async function resetPassword(id: string, newPassword: string, actor: Audi
   return { ok: true, sessionsRevoked: revoked };
 }
 
+/**
+ * Owner recovery (`admin:bootstrap --reset`, M11 P1-T5): in ONE transaction, under a row lock, set a new password on an
+ * owner account, reactivate and unlock it, end every one of its sessions AND every shared-password session (a recovery
+ * suggests the old credentials may be known to someone else), and write the `owner.recover` audit row. Only owners.
+ */
+export async function recoverOwner(email: string, newPassword: string, actor: AuditActor): Promise<UserResult<{ userId: string; sessionsRevoked: number; legacySessionsRevoked: number; reactivated: boolean }>> {
+  const normalized = normalizeEmail(email);
+  const problem = passwordProblem(newPassword, normalized);
+  if (problem) return fail("weak_password", problem);
+  const passwordHash = await hashPassword(newPassword);
+  return db.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<{ id: string; role: string; active: boolean }[]>(Prisma.sql`SELECT "id", "role"::text AS "role", "active" FROM "AdminUser" WHERE "email" = ${normalized} FOR UPDATE`);
+    const u = rows[0];
+    if (!u || u.role !== "owner") return fail("not_found", "No owner account with that email.");
+    const now = new Date();
+    await tx.adminUser.update({ where: { id: u.id }, data: { passwordHash, passwordChangedAt: now, active: true, failedLogins: 0, lockedUntil: null } });
+    const own = (await tx.adminSession.updateMany({ where: { userId: u.id, revokedAt: null }, data: { revokedAt: now } })).count;
+    const legacy = (await tx.adminSession.updateMany({ where: { legacy: true, revokedAt: null }, data: { revokedAt: now } })).count;
+    await writeAuditTx(tx, { action: "owner.recover", outcome: "success", admin: actor, targetType: "admin_user", targetId: u.id, details: { reactivated: !u.active, sessionsRevoked: own, legacySessionsRevoked: legacy } });
+    return { ok: true as const, userId: u.id, sessionsRevoked: own, legacySessionsRevoked: legacy, reactivated: !u.active };
+  });
+}
+
 /** Self-service change: needs the current password, ends every OTHER session, keeps the one in use. */
 export async function changeOwnPassword(id: string, current: string, next: string, keepSessionId: string, actor: AuditActor): Promise<UserResult<{ sessionsRevoked: number }>> {
   const u = await db.adminUser.findUnique({ where: { id }, select: { email: true, passwordHash: true } });

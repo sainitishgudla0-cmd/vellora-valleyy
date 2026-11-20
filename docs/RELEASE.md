@@ -10,7 +10,14 @@ Follow "Production baselining" in `RUNBOOK-DATABASE.md` step by step. Agent role
 - [ ] Production matches the `0_init` schema: the read-only `prisma migrate diff --from-url "$PROD_UNPOOLED" --to-schema-datamodel <0_init schema> --script --exit-code` from `RUNBOOK-DATABASE.md` step 3 prints an empty migration, exit 0. Anything else: stop, write an ADR. (Not `--to-migrations`: that always differs by the later migrations, F02.)
 - [ ] Rehearsal on the Neon branch: `migrate resolve --applied 0_init`, then `migrate deploy` applies every later migration (M2-M10, 13 of them) cleanly; read paths and a test order work on that branch.
 - [ ] Production: `resolve --applied 0_init`, then `db:migrate:deploy:production` (needs `APP_ENV=production` and `CONFIRM_PRODUCTION_DB_HOST=<host>`), then `db:schema:diff` = no difference.
-- [ ] `admin:bootstrap` for the first owner; retire `ADMIN_PASSWORD` (`ADMIN_LEGACY_LOGIN=off`).
+- [ ] `admin:bootstrap` for the first owner **before** the new code reaches production: the shared-password login is always off in production from M11 P1-T5, so without an owner account nobody can sign in. Then remove `ADMIN_PASSWORD` from the Production scope (`env:check` warns while it is there) and set `ADMIN_LEGACY_LOGIN=off` in Preview once staff have individual accounts.
+
+### A1b. Owner recovery (M11 P1-T5, operator)
+Use when the only owner is locked out, deactivated, has forgotten the password, or the password may be known to someone else.
+1. From a trusted machine with the target database's credentials (production needs the db-guard confirmation: `APP_ENV=production CONFIRM_PRODUCTION_DB_HOST=<host>`): `npm run admin:bootstrap -- --reset --email <owner email>`. The password comes from a hidden prompt (or `ADMIN_BOOTSTRAP_PASSWORD` in the environment, never an argument); policy: 12-200 characters, at least 5 different characters, not containing the email name (`passwordProblem`, `src/lib/auth/password.ts`).
+2. In one transaction it sets the new password, reactivates and unlocks the account, ends every session of that owner **and every shared-password session**, and writes `owner.recover` to the audit log (actor `bootstrap-script`). If the audit row cannot be written nothing changes.
+3. Sign in at `/admin` with the new password, open Team, review accounts and the activity log (look for `owner.recover` and anything unexpected before it), change other people's passwords or deactivate them if compromise is suspected.
+4. Only owner accounts can be recovered this way; any other account is reset by an owner from Team. If no owner account exists any more, `npm run admin:bootstrap -- --email … --name …` creates one (it refuses while an owner exists).
 
 ### A2. Environment variables (operator, Vercel)
 | Variable | Production | Preview | Notes |

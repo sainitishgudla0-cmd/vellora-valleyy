@@ -1,7 +1,7 @@
 /**
  * Operator tool (M4-T4, ADR 0012): create the FIRST owner account, or reset an owner's password (recovery).
  *   npm run admin:bootstrap -- --email you@example.com --name "Your Name"
- *   npm run admin:bootstrap -- --reset --email you@example.com
+ *   npm run admin:bootstrap -- --reset --email you@example.com   (owner recovery: docs/RELEASE.md "Owner recovery")
  * Guarded by scripts/db-guard.ts (production needs the explicit confirmation). The password comes from the
  * ADMIN_BOOTSTRAP_PASSWORD environment variable or a hidden prompt; it is never an argument, never printed, never logged.
  * Creating refuses if any owner exists (further accounts are made by an owner through the admin API).
@@ -49,18 +49,19 @@ async function main() {
   if (!email) throw new Error("--email is required");
   const reset = process.argv.includes("--reset");
   const { db } = await import("../src/lib/db");
-  const { createUser, resetPassword } = await import("../src/lib/auth/users");
+  const { createUser, recoverOwner } = await import("../src/lib/auth/users");
   const { writeAudit } = await import("../src/lib/auth/audit");
   const who = { userId: null, label: "bootstrap-script", role: "owner" as const };
 
   if (reset) {
-    const user = await db.adminUser.findUnique({ where: { email } });
-    if (!user || user.role !== "owner") throw new Error("No owner account with that email.");
-    const r = await resetPassword(user.id, await readPassword(), who);
+    // one transaction: new password, reactivated, unlocked, every session of the owner and every shared-password session
+    // ended, audited as owner.recover (M11 P1-T5)
+    const exists = await db.adminUser.findUnique({ where: { email }, select: { role: true } });
+    if (!exists || exists.role !== "owner") throw new Error("No owner account with that email.");
+    const r = await recoverOwner(email, await readPassword(), who);
     if (!r.ok) throw new Error(r.message);
-    await db.adminUser.update({ where: { id: user.id }, data: { active: true } });
-    await writeAudit({ action: "owner.password_reset", outcome: "success", admin: who, targetType: "admin_user", targetId: user.id, details: { sessionsRevoked: r.sessionsRevoked } });
-    console.log(`[admin] Password reset for ${email}; ${r.sessionsRevoked} session(s) ended; account unlocked and active.`);
+    console.log(`[admin] Owner ${email} recovered: password replaced, ${r.sessionsRevoked} session(s) and ${r.legacySessionsRevoked} shared-password session(s) ended; account unlocked and active.`);
+    await db.$disconnect();
     return;
   }
 

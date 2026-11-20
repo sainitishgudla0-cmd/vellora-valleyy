@@ -211,8 +211,16 @@ describe("recording refunds made outside the system", () => {
   it("refuses to mark a captured gateway payment refunded by hand, for every role that holds orders:write", async () => {
     const operations = await createTestAdmin("operations");
     const legacy = await createLegacySession();
+    // the shared-password session no longer holds orders:write at all (M11 P1-T5): 403 before anything is read
     for (const mode of ["razorpay_test", "razorpay_live"] as const) {
-      for (const who of [admin.cookie, operations.cookie, legacy.cookie]) {
+      cookie = legacy.cookie;
+      const rz = await capturedGatewayOrder(mode);
+      expect((await patch(rz.order.id, { paymentStatus: "refunded", reason: "Refunded from the Razorpay dashboard" })).status).toBe(403);
+      expect(await load(rz.order.id)).toMatchObject({ status: "paid", paymentStatus: "paid" });
+      expect(await events(rz.order.id)).toHaveLength(0);
+    }
+    for (const mode of ["razorpay_test", "razorpay_live"] as const) {
+      for (const who of [admin.cookie, operations.cookie]) {
         cookie = who;
         const rz = await capturedGatewayOrder(mode);
         const r = await patch(rz.order.id, { paymentStatus: "refunded", reason: "Refunded from the Razorpay dashboard" });
