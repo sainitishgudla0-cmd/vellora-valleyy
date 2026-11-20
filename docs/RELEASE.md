@@ -90,6 +90,7 @@ Until a variant is tracked, availability is the manual `inStock` flag and nothin
 Agent prepares, operator promotes. `main` is promoted only by the operator.
 1. [ ] `backend/development` is green in CI at the SHA being released; `npm run verify` and (milestone releases) `verify:full` with `VERIFY_UI=1` pass locally; quote the summary lines.
 2. [ ] `npm audit` 0; `npm run lint` clean (warnings ≤ the ratchet).
+2b. [ ] `npm run ops:readiness` with the target environment's variables (operator shell; read-only) shows no `blocker`; every `action` is either accepted for this release or resolved (M11; the same report is `GET /api/admin/readiness` for owners).
 3. [ ] Migrations in the release listed (`git diff main..backend/development --stat -- prisma/migrations`); each is additive or has an ADR plus rollback note in `RUNBOOK-DATABASE.md`.
 4. [ ] **Back up first:** Neon branch `pre-release-YYYYMMDD-<sha>` from production.
 5. [ ] Apply migrations to production **before** the app: `db:migrate:deploy:production`; then `db:schema:diff` = no difference.
