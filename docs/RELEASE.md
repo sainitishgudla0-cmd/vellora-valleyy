@@ -73,6 +73,11 @@ Until a variant is tracked, availability is the manual `inStock` flag and nothin
 3. [ ] Apply in a quiet period: add `--apply --reason "Opening count YYYY-MM-DD"`. Each row is its own transaction through the stock ledger (actor `system`/`inventory-import`), compare-and-set against the count seen in the plan: a row whose stock moved meanwhile is refused (`stock_changed`), never overwritten; re-run the dry run and apply again. Re-running the same file changes nothing.
 4. [ ] Check the admin low-stock list and a product page; tracked variants with 0 units show as unavailable.
 
+### A9. GST sign-off (M11 P3-T6, F14; accountant)
+1. [ ] `npm run tax:signoff-sheet > gst-signoff.csv` (read-only) lists every HSN code used by an active pack (and `DELIVERY`), the products using it and any rate already recorded. It never proposes a rate.
+2. [ ] The accountant fills `approved_rate_percent`, `effective_from`, `approved_by`, and confirms: the rounding rule (half-up per line, ADR 0015), whether e-invoicing (IRN) applies at the business's turnover, and the credit-note process (not built; an invoiced order cannot be cancelled until it is).
+3. [ ] An owner enters each approved row under Admin → Settings → GST rates (append-only), and `SELLER_GSTIN` is set in Production. `npm run ops:readiness` then shows both tax checks `ok`; issue one invoice on a test order and have the accountant check the PDF.
+
 ## B0. First promotion of the backend onto production (one-time cutover, M11 P2-T3)
 `main`'s code cannot take orders on the migrated schema and the backend cannot run on `main`'s schema (`RUNBOOK-DATABASE.md` "Release compatibility matrix"), so this release is a short, planned ordering outage, not a rolling update.
 1. [ ] Gates in section B steps 1-3 green; A1 rehearsal done on a Neon clone of production (real data); `npm run db:baseline-rehearsal` green on a disposable DB.
