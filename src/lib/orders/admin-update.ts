@@ -18,6 +18,10 @@ import { transitionOrder, validateTransition, type TransitionErrorCode } from ".
  *  their payment edited here: they need operator reconciliation.
  * A successful change writes its `order.update` audit row in the same transaction (M11 P1-T4): no audit, no change.
  */
+/** How offline money was collected or returned (M11 P1-T2). Mirrors the `Payment_manual_method_check` constraint. */
+export const OFFLINE_METHODS = ["cash", "upi", "bank_transfer", "cheque", "card_on_delivery"] as const;
+export type OfflineMethod = (typeof OFFLINE_METHODS)[number];
+
 export interface AdminOrderUpdate {
   orderId: string;
   status?: OrderStatus;
@@ -27,9 +31,11 @@ export interface AdminOrderUpdate {
   adminId?: string;
   /** who is recorded on the audit row written with the change */
   audit: AuditActor;
+  /** Required for every payment edit (M11 P1-T2): the amount the recorder attests was collected/returned, and how. */
+  offline?: { amountPaise: number; method: OfflineMethod };
 }
 
-export type AdminUpdateCode = TransitionErrorCode | "payment_edit_not_allowed" | "no_payment_record" | "reference_in_use";
+export type AdminUpdateCode = TransitionErrorCode | "payment_edit_not_allowed" | "no_payment_record" | "reference_in_use" | "offline_details_required" | "amount_mismatch";
 
 export type AdminUpdateResult = { ok: true; changed: boolean } | { ok: false; code: AdminUpdateCode | "not_found"; message: string };
 
@@ -80,6 +86,9 @@ export async function updateOrderAsAdmin(input: AdminOrderUpdate): Promise<Admin
         const attempt = await tx.payment.findFirst({ where: { orderId: order.id, status: order.paymentStatus }, orderBy: { createdAt: "desc" } });
         if (!attempt) throw new Abort(no("no_payment_record", "This order has no payment record to update"));
         if (attempt.provider !== "request_only") throw new Abort(no("payment_edit_not_allowed", online));
+        // M11 P1-T2: the recorder attests the exact amount and how it moved; partial collections/returns are not recorded here
+        if (!input.offline) throw new Abort(no("offline_details_required", "Enter the amount and how the money was " + (manualConfirm ? "collected" : "returned")));
+        if (input.offline.amountPaise !== attempt.amount) throw new Abort(no("amount_mismatch", `The amount must be the full payment of ₹${(attempt.amount / 100).toFixed(2)}; partial ${manualConfirm ? "collections" : "returns"} are not recorded here`));
 
         // Validate reason/reference (and the transition) before touching the Payment row.
         const invalid = validateTransition({ from: order.status, to, payment: { from: order.paymentStatus, to: target }, actor: { type: "admin", id: adminId }, reason, paymentReference: input.paymentReference });
@@ -87,7 +96,7 @@ export async function updateOrderAsAdmin(input: AdminOrderUpdate): Promise<Admin
 
         const claimed = await tx.payment.updateMany({
           where: { id: attempt.id, status: order.paymentStatus },
-          data: { status: target, ...(manualConfirm ? { manualReference: input.paymentReference?.trim() } : {}) },
+          data: { status: target, ...(manualConfirm ? { manualReference: input.paymentReference?.trim(), manualMethod: input.offline.method, manualRecordedBy: adminId, manualRecordedAt: new Date() } : {}) },
         });
         if (claimed.count === 0) throw new Abort(no("stale_state", "The payment changed since it was read"));
         payment = { from: order.paymentStatus, to: target };
@@ -98,7 +107,7 @@ export async function updateOrderAsAdmin(input: AdminOrderUpdate): Promise<Admin
         tx,
       );
       if (!moved.ok) throw new Abort(no(moved.code, moved.message));
-      await writeAuditTx(tx, { action: "order.update", outcome: "success", admin: input.audit, targetType: "order", targetId: order.id, details: { status: input.status, paymentStatus: input.paymentStatus, changed: true } });
+      await writeAuditTx(tx, { action: "order.update", outcome: "success", admin: input.audit, targetType: "order", targetId: order.id, details: { status: input.status, paymentStatus: input.paymentStatus, changed: true, ...(payment && input.offline ? { offlineMethod: input.offline.method, amountPaise: input.offline.amountPaise } : {}) } });
     });
     return { ok: true, changed: true };
   } catch (e) {

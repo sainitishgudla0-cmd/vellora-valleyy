@@ -21,6 +21,9 @@ export const PERMISSIONS = [
   "fulfilment:write", // issue invoices, create/update shipments, shipping rules, retry notifications
   "tax:write", // GST rates (set with the accountant's sign-off)
   "refunds:write", // return money to a customer through the payment gateway (owner only: it moves real money)
+  // record money collected or returned OUTSIDE any gateway (cash/UPI/bank on delivery), with amount and method attested
+  // (M11 P1-T2, ADR 0024). Owner only until the business decides who else may record collections.
+  "payments:record",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 

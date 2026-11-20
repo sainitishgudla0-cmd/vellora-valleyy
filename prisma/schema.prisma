@@ -227,6 +227,11 @@ model Payment {
   lastCheckedAt       DateTime?
   /// Staff-entered external payment reference (UPI/bank/cash-receipt id) when a request-only payment was confirmed manually (M2-T6). Unique: one external payment cannot confirm two orders.
   manualReference     String?         @unique
+  /// How an offline (request-only) payment was collected, attested by the recorder (M11 P1-T2): cash | upi | bank_transfer | cheque | card_on_delivery. Immutable once set (DB trigger).
+  manualMethod        String?
+  /// Admin account id that recorded the offline collection, and when (M11 P1-T2). Immutable once set.
+  manualRecordedBy    String?
+  manualRecordedAt    DateTime?
   refunds             Refund[]
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt

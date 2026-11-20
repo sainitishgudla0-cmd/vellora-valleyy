@@ -23,7 +23,7 @@ Open it from the **Orders** tab (click the order number). The order page shows t
 1. **Confirm** (pay-on-delivery orders): status menu at the top right → *confirmed*. Staff confirm delivery charges with the customer before dispatch if no shipping rule applies.
 2. **Ship**: *Shipments* → courier, AWB, tracking link → *Add shipment*. Then set the order status to *dispatched* (the customer's dispatch email carries the tracking details). Update the shipment as it moves (*picked up*, *in transit*, *delivered*).
 3. **Delivered**: set the order status to *delivered*.
-4. **Money received on delivery**: *Record a pay-on-delivery collection* → the receipt/UTR/reference and how it was collected. One reference can only be used once.
+4. **Money received on delivery** (owners): *Record a pay-on-delivery collection* → the full amount received, the method (cash, UPI, bank transfer, cheque, card on delivery), the receipt/UTR/reference and a note. The amount must equal the order total; one reference can only be used once; the record cannot be changed afterwards. Operations staff see the order but cannot record money until the owner decides they may (ADR 0024).
 5. **Invoice**: *Issue tax invoice*. If it says a GST rate is missing it lists the HSN codes; an owner adds the accountant-approved rate under **Settings** first. Once an order is invoiced it cannot be cancelled (credit notes are not built yet).
 6. **Cancel**: status → *cancelled* with a reason. Stock held for the order is released automatically. An order already paid online then needs a refund.
 

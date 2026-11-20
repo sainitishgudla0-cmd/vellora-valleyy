@@ -68,7 +68,7 @@ afterAll(async () => {
 describe("payments and orders fail closed without their audit row", () => {
   it("manual payment confirmation: audit failure leaves order, payment and history untouched; the retry succeeds with exactly one audit row", async () => {
     const order = await codOrder();
-    const body = { paymentStatus: "paid", reason: "Cash collected", paymentReference: `RCPT-AUD-${tag}` };
+    const body = { paymentStatus: "paid", reason: "Cash collected", paymentReference: `RCPT-AUD-${tag}`, offline: { amountPaise: order.total, method: "cash" } };
     await withFailingAudit("order.update", () => expect(patchOrder(req("/api/admin/orders/x", "PATCH", owner.cookie, body), ctx(order.id))).rejects.toThrow());
     const after = await db.order.findUniqueOrThrow({ where: { id: order.id }, include: { payments: true, events: true } });
     expect(after.paymentStatus).toBe("unpaid");

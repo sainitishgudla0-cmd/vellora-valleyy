@@ -52,6 +52,10 @@ test("order page: record a pay-on-delivery collection, add and move a shipment, 
   await expect(page.getByTestId("order-history")).toContainText("confirmed");
 
   const ref = `RCPT-E2E-${stamp()}`;
+  page.once("dialog", (d) => d.accept()); // "this record cannot be changed later"
+  const total = (await db().order.findUniqueOrThrow({ where: { id: orderId } })).total;
+  await page.getByLabel(/Amount received/).fill((total / 100).toFixed(2));
+  await page.getByLabel("Method").selectOption("upi");
   await page.getByLabel("Receipt / UTR / reference").fill(ref);
   await page.getByLabel("How it was collected").fill("Cash on delivery collected by courier");
   await page.getByRole("button", { name: "Record payment received" }).click();
@@ -70,7 +74,7 @@ test("order page: record a pay-on-delivery collection, add and move a shipment, 
   await expect(page.getByTestId("invoice-issued")).toBeVisible();
   const o = await db().order.findUniqueOrThrow({ where: { id: orderId }, include: { payments: true, invoice: true, shipments: true } });
   expect(o.paymentStatus).toBe("paid");
-  expect(o.payments[0].manualReference).toBe(ref);
+  expect(o.payments[0]).toMatchObject({ manualReference: ref, manualMethod: "upi" });
   expect(o.invoice).not.toBeNull();
   expect(o.shipments[0]).toMatchObject({ awb, status: "picked_up" });
   const audit = await db().auditLog.findMany({ where: { targetId: orderId, action: { in: ["order.update", "shipment.create", "invoice.issue"] }, outcome: "success" } });
@@ -86,7 +90,7 @@ test("cancelling a paid order from the status menu asks for the reason and recor
     const res = await must(await admin.post("/api/orders", { data: { customerName: "SMOKE TEST Admin Ops", email: `smoke.adminops-${stamp()}@example.com`, phone: "9876543210", addressLine1: "1 Test Street", addressLine2: "", city: "Anantapur", state: "Andhra Pradesh", pincode: "515002", notes: "", paymentMethod: "cod", items: [{ variantId: v.id, quantity: 1 }] } }));
     id = (await db().order.findUniqueOrThrow({ where: { number: (await res.json()).order.number } })).id;
     await must(await admin.patch(`/api/admin/orders/${id}`, { data: { status: "confirmed", reason: "e2e" } }));
-    await must(await admin.patch(`/api/admin/orders/${id}`, { data: { paymentStatus: "paid", reason: "cash", paymentReference: `RCPT-CXL-${stamp()}` } }));
+    await must(await admin.patch(`/api/admin/orders/${id}`, { data: { paymentStatus: "paid", reason: "cash", paymentReference: `RCPT-CXL-${stamp()}`, offline: { amountPaise: (await db().order.findUniqueOrThrow({ where: { id } })).total, method: "cash" } } }));
   } finally {
     await admin.dispose();
   }

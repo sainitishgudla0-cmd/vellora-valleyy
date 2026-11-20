@@ -105,7 +105,14 @@ export default async function AdminOrderPage({ params }: { params: Promise<{ id:
               {order.payments.map((p) => (
                 <li key={p.id}>
                   {p.provider === "request_only" ? "Pay on delivery" : p.provider === "mock" ? "Mock (no money)" : "Razorpay"} · {formatPrice(p.amount)} · <span className="font-medium">{label(p.status)}</span>
-                  {p.manualReference && <span className="text-forest/60"> · ref {p.manualReference}</span>}
+                  {p.manualReference && (
+                    <span className="text-forest/60">
+                      {" "}
+                      · ref {p.manualReference}
+                      {p.manualMethod ? ` · ${p.manualMethod.replace(/_/g, " ")}` : ""}
+                      {p.manualRecordedAt ? ` · recorded ${when(p.manualRecordedAt)}` : ""}
+                    </span>
+                  )}
                   {p.needsReconciliation && <span className="ml-1 rounded-full bg-gold px-2 py-0.5 text-[10px] uppercase tracking-wider">{label(p.reconcileReason ?? "awaiting reconciliation")}</span>}
                 </li>
               ))}
@@ -121,12 +128,13 @@ export default async function AdminOrderPage({ params }: { params: Promise<{ id:
               ))}
             </ul>
           )}
-          {requestOnlyUnpaid && admin.can("orders:write") && (
+          {requestOnlyUnpaid && admin.can("payments:record") && (
             <div className="mt-4 border-t border-forest/10 pt-3">
               <p className="font-medium">Record a pay-on-delivery collection</p>
-              <ManualPaymentForm orderId={order.id} />
+              <ManualPaymentForm orderId={order.id} amountPaise={order.payments.find((p) => p.provider === "request_only" && p.status === "unpaid")!.amount} />
             </div>
           )}
+          {requestOnlyUnpaid && !admin.can("payments:record") && <p className="mt-3 text-[12.5px] text-forest/60">Payments received on delivery are recorded by an owner account.</p>}
           {refundable.length > 0 && admin.can("refunds:write") && (
             <div className="mt-4 border-t border-forest/10 pt-3">
               <p className="font-medium">Refund</p>

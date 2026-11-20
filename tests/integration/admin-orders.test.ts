@@ -12,6 +12,8 @@ const patch = async (id: string, body: unknown) => {
   const res = await PATCH(new Request("http://localhost/api/admin/orders/x", { method: "PATCH", headers: cookie ? { cookie } : {}, body: JSON.stringify(body) }), { params: Promise.resolve({ id }) });
   return { status: res.status, body: (await res.json()) as Record<string, any> };
 };
+/** M11 P1-T2: every payment edit carries the attested full amount and method (fixtures total ₹1,050). */
+const OFFLINE = { amountPaise: 105000, method: "cash" } as const;
 const load = (id: string) => db.order.findUniqueOrThrow({ where: { id }, include: { payments: true } });
 const events = (orderId: string) => db.orderEvent.findMany({ where: { orderId }, orderBy: { createdAt: "asc" } });
 
@@ -68,7 +70,7 @@ describe("status transitions", () => {
     const cod = await codOrder("confirmed");
     expect((await patch(cod.id, { status: "paid" })).status).toBe(409);
     const online = await createRazorpayOrderWithAttempt({});
-    const r = await patch(online.order.id, { status: "paid", paymentStatus: "paid", reason: "customer says paid", paymentReference: "UPI-123456" });
+    const r = await patch(online.order.id, { status: "paid", paymentStatus: "paid", reason: "customer says paid", paymentReference: "UPI-123456", offline: OFFLINE });
     expect(r.status).toBe(409);
     expect(await load(online.order.id)).toMatchObject({ status: "awaiting_payment", paymentStatus: "unpaid" });
     expect(await events(online.order.id)).toHaveLength(0);
@@ -114,7 +116,7 @@ describe("status transitions", () => {
 });
 
 describe("manual payment confirmation (request-only orders)", () => {
-  const confirm = (id: string, over: object = {}) => patch(id, { paymentStatus: "paid", reason: "Cash collected on delivery", paymentReference: "RCPT-2026-0001", ...over });
+  const confirm = (id: string, over: object = {}) => patch(id, { paymentStatus: "paid", reason: "Cash collected on delivery", paymentReference: "RCPT-2026-0001", ...over, offline: OFFLINE });
 
   it("needs a reason and a reference; with both it marks the payment and the attempt paid, status unchanged, one audited event", async () => {
     const o = await codOrder("delivered");
@@ -154,7 +156,7 @@ describe("manual payment confirmation (request-only orders)", () => {
 
   it("cannot be combined with a status change, and never on a cancelled order", async () => {
     const o = await codOrder("dispatched");
-    expect((await patch(o.id, { status: "delivered", paymentStatus: "paid", reason: "r", paymentReference: "RCPT-COMBO-1" })).status).toBe(409);
+    expect((await patch(o.id, { status: "delivered", paymentStatus: "paid", reason: "r", paymentReference: "RCPT-COMBO-1", offline: OFFLINE })).status).toBe(409);
     expect(await load(o.id)).toMatchObject({ status: "dispatched", paymentStatus: "unpaid" });
     const c = await codOrder("cancelled");
     expect((await confirm(c.id, { paymentReference: "RCPT-CANCELLED-1" })).status).toBe(409);
@@ -190,13 +192,13 @@ describe("manual payment confirmation (request-only orders)", () => {
 describe("recording refunds made outside the system", () => {
   it("paid → refunded on a request-only order needs a reason, updates the attempt and records the event", async () => {
     const cod = await codOrder("delivered", "paid");
-    expect((await patch(cod.id, { paymentStatus: "refunded" })).status).toBe(422);
-    expect((await patch(cod.id, { paymentStatus: "refunded", reason: "Refunded in cash at the counter" })).status).toBe(200);
+    expect((await patch(cod.id, { paymentStatus: "refunded", offline: OFFLINE })).status).toBe(422);
+    expect((await patch(cod.id, { paymentStatus: "refunded", reason: "Refunded in cash at the counter", offline: OFFLINE })).status).toBe(200);
     expect(await load(cod.id)).toMatchObject({ paymentStatus: "refunded" });
     expect((await load(cod.id)).payments[0].status).toBe("refunded");
     expect((await events(cod.id))[0]).toMatchObject({ fromPaymentStatus: "paid", toPaymentStatus: "refunded", actorType: "admin", paymentReference: null });
     // a refunded payment is terminal
-    expect((await patch(cod.id, { paymentStatus: "paid", reason: "oops", paymentReference: "RCPT-AGAIN-1" })).status).toBe(409);
+    expect((await patch(cod.id, { paymentStatus: "paid", reason: "oops", paymentReference: "RCPT-AGAIN-1", offline: OFFLINE })).status).toBe(409);
   });
 
   // M11 P1-T1 (finding F03): a status PATCH must never record a gateway refund that the gateway has not reported.
@@ -215,15 +217,19 @@ describe("recording refunds made outside the system", () => {
     for (const mode of ["razorpay_test", "razorpay_live"] as const) {
       cookie = legacy.cookie;
       const rz = await capturedGatewayOrder(mode);
-      expect((await patch(rz.order.id, { paymentStatus: "refunded", reason: "Refunded from the Razorpay dashboard" })).status).toBe(403);
+      expect((await patch(rz.order.id, { paymentStatus: "refunded", reason: "Refunded from the Razorpay dashboard", offline: OFFLINE })).status).toBe(403);
       expect(await load(rz.order.id)).toMatchObject({ status: "paid", paymentStatus: "paid" });
       expect(await events(rz.order.id)).toHaveLength(0);
     }
     for (const mode of ["razorpay_test", "razorpay_live"] as const) {
-      for (const who of [admin.cookie, operations.cookie]) {
+      // operations holds orders:write but not payments:record (M11 P1-T2): refused before anything is read
+      cookie = operations.cookie;
+      const blocked = await capturedGatewayOrder(mode);
+      expect((await patch(blocked.order.id, { paymentStatus: "refunded", reason: "Refunded from the Razorpay dashboard", offline: OFFLINE })).status).toBe(403);
+      for (const who of [admin.cookie]) {
         cookie = who;
         const rz = await capturedGatewayOrder(mode);
-        const r = await patch(rz.order.id, { paymentStatus: "refunded", reason: "Refunded from the Razorpay dashboard" });
+        const r = await patch(rz.order.id, { paymentStatus: "refunded", reason: "Refunded from the Razorpay dashboard", offline: OFFLINE });
         expect(r).toMatchObject({ status: 409, body: { code: "payment_edit_not_allowed" } });
         const after = await load(rz.order.id);
         expect(after).toMatchObject({ status: "paid", paymentStatus: "paid" });
@@ -239,13 +245,13 @@ describe("recording refunds made outside the system", () => {
 
   it("refuses it combined with a status change, and when a request-only order carries a gateway attempt", async () => {
     const rz = await capturedGatewayOrder("razorpay_test");
-    expect((await patch(rz.order.id, { status: "cancelled", paymentStatus: "refunded", reason: "Customer cancelled" })).body.code).toBe("payment_edit_not_allowed");
+    expect((await patch(rz.order.id, { status: "cancelled", paymentStatus: "refunded", reason: "Customer cancelled", offline: OFFLINE })).body.code).toBe("payment_edit_not_allowed");
     expect(await load(rz.order.id)).toMatchObject({ status: "paid", paymentStatus: "paid" });
 
     // defence in depth: the attempt's provider decides, not only the order's recorded mode
     const odd = await createFixtureOrder({ paymentMethod: "cod", paymentMode: "request_only", status: "delivered", paymentStatus: "paid" });
     await db.payment.create({ data: { orderId: odd.id, provider: "razorpay", mode: "razorpay_test", amount: odd.total, currency: "INR", status: "paid", providerPaymentId: `pay_fixture_odd_${odd.number.slice(-6).replace(/\W/g, "")}` } });
-    expect((await patch(odd.id, { paymentStatus: "refunded", reason: "Refunded in cash" })).body.code).toBe("payment_edit_not_allowed");
+    expect((await patch(odd.id, { paymentStatus: "refunded", reason: "Refunded in cash", offline: OFFLINE })).body.code).toBe("payment_edit_not_allowed");
     expect((await load(odd.id)).payments[0].status).toBe("paid");
   });
 });
@@ -257,7 +263,7 @@ describe("atomicity", () => {
     await db.$executeRawUnsafe(`CREATE FUNCTION ${name}() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'injected failure'; END $$ LANGUAGE plpgsql`);
     await db.$executeRawUnsafe(`CREATE TRIGGER ${name} BEFORE INSERT ON "OrderEvent" FOR EACH ROW WHEN (NEW."orderId" = '${o.id}') EXECUTE FUNCTION ${name}()`);
     try {
-      await expect(patch(o.id, { paymentStatus: "paid", reason: "Cash", paymentReference: "RCPT-ATOMIC-1" })).rejects.toThrow();
+      await expect(patch(o.id, { paymentStatus: "paid", reason: "Cash", paymentReference: "RCPT-ATOMIC-1", offline: OFFLINE })).rejects.toThrow();
     } finally {
       await db.$executeRawUnsafe(`DROP TRIGGER IF EXISTS ${name} ON "OrderEvent"`);
       await db.$executeRawUnsafe(`DROP FUNCTION IF EXISTS ${name}()`);
@@ -265,7 +271,7 @@ describe("atomicity", () => {
     const after = await load(o.id);
     expect(after.paymentStatus).toBe("unpaid");
     expect(after.payments[0]).toMatchObject({ status: "unpaid", manualReference: null });
-    expect((await patch(o.id, { paymentStatus: "paid", reason: "Cash", paymentReference: "RCPT-ATOMIC-1" })).status).toBe(200);
+    expect((await patch(o.id, { paymentStatus: "paid", reason: "Cash", paymentReference: "RCPT-ATOMIC-1", offline: OFFLINE })).status).toBe(200);
   });
 });
 

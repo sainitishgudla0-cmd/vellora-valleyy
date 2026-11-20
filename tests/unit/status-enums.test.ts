@@ -11,7 +11,7 @@ import { ORDER_STATUS_LABEL } from "@/lib/orders";
 import { PAYABLE_PAYMENT_STATUSES } from "@/lib/payment-verification";
 import { orderSchema } from "@/lib/validation";
 
-const svc = vi.hoisted(() => ({ updateOrderAsAdmin: vi.fn() }));
+const svc = vi.hoisted(() => ({ updateOrderAsAdmin: vi.fn(), OFFLINE_METHODS: ["cash", "upi", "bank_transfer", "cheque", "card_on_delivery"] as const }));
 const authMock = vi.hoisted(() => ({ requireAdmin: vi.fn() }));
 vi.mock("@/lib/orders/admin-update", () => svc);
 vi.mock("@/lib/auth/admin", () => authMock);

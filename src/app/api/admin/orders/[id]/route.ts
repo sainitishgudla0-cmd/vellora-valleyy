@@ -4,7 +4,7 @@ import { OrderStatus, PaymentStatus } from "@prisma/client";
 import { fail, json, parseBody } from "@/lib/api";
 import { requireAdmin } from "@/lib/auth/admin";
 import { writeAudit } from "@/lib/auth/audit";
-import { updateOrderAsAdmin } from "@/lib/orders/admin-update";
+import { OFFLINE_METHODS, updateOrderAsAdmin } from "@/lib/orders/admin-update";
 
 const schema = z.object({
   // Derived from the Prisma enums so the API and the database cannot drift apart.
@@ -14,6 +14,8 @@ const schema = z.object({
   reason: z.string().trim().max(500).optional(),
   // External payment reference for a manual payment confirmation (request-only orders).
   paymentReference: z.string().trim().max(80).optional(),
+  // M11 P1-T2: required with any paymentStatus change: the full amount (paise) the recorder attests, and how it moved
+  offline: z.strictObject({ amountPaise: z.number().int().positive().max(100_000_000), method: z.enum(OFFLINE_METHODS) }).optional(),
 });
 
 /** Contract: docs/API-CONTRACTS.md (Admin). Every change goes through the order state machine (ADR 0010). */
@@ -24,9 +26,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const parsed = await parseBody(req, schema);
   if ("response" in parsed) return parsed.response;
 
-  const r = await updateOrderAsAdmin({ orderId: id, ...parsed.data, adminId: auth.admin.actorId, audit: auth.admin });
   // ids and field names only: the free-text reason and payment reference live on the OrderEvent, not here
   const base = { action: "order.update", admin: auth.admin, targetType: "order", targetId: id } as const;
+  // M11 P1-T2: recording money that moved outside any gateway is its own permission (owner only for now), never the
+  // shared-password session; holding orders:write is not enough.
+  if (parsed.data.paymentStatus !== undefined && !auth.admin.can("payments:record")) {
+    await writeAudit({ action: "access.denied", outcome: "denied", admin: auth.admin, targetType: "order", targetId: id, details: { permission: "payments:record", method: req.method } });
+    return fail("Recording offline payments needs an owner account", 403);
+  }
+  const r = await updateOrderAsAdmin({ orderId: id, ...parsed.data, adminId: auth.admin.actorId, audit: auth.admin });
   const changed = { status: parsed.data.status, paymentStatus: parsed.data.paymentStatus };
   if (r.ok) {
     // a real change was audited inside its transaction (P1-T4); a no-op is recorded here, best-effort
@@ -39,6 +47,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       return fail("Order not found", 404);
     case "reason_required":
       return fail(r.message, 422, { reason: "A reason is required for this change" });
+    case "offline_details_required":
+    case "amount_mismatch":
+      return fail(r.message, 422, { offline: r.message });
     case "reference_required":
     case "invalid_reason":
       return fail(r.message, 422, { [r.code === "reference_required" ? "paymentReference" : "reason"]: r.message });

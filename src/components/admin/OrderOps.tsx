@@ -78,20 +78,50 @@ export function RefundForm({ orderId, payments }: { orderId: string; payments: {
   );
 }
 
-/** Pay-on-delivery cash/bank collection recorded with the external reference (request-only orders only; the API refuses others). */
-export function ManualPaymentForm({ orderId }: { orderId: string }) {
+const METHODS: [string, string][] = [
+  ["cash", "Cash"],
+  ["upi", "UPI"],
+  ["bank_transfer", "Bank transfer"],
+  ["cheque", "Cheque"],
+  ["card_on_delivery", "Card on delivery"],
+];
+
+/**
+ * Pay-on-delivery collection recorded with the attested full amount, method and external reference (M11 P1-T2; request-only
+ * orders only, `payments:record`; the API refuses everything else). The record cannot be changed afterwards.
+ */
+export function ManualPaymentForm({ orderId, amountPaise }: { orderId: string; amountPaise: number }) {
   const { busy, run, note } = useAction();
   const [reference, setReference] = useState("");
   const [reason, setReason] = useState("");
+  const [method, setMethod] = useState("");
+  const [amount, setAmount] = useState("");
   return (
     <form
       className="mt-3 grid gap-2 sm:grid-cols-2 sm:items-end"
       data-testid="manual-payment-form"
       onSubmit={async (e) => {
         e.preventDefault();
-        await run(() => adminApi("PATCH", `/api/admin/orders/${orderId}`, { paymentStatus: "paid", reason, paymentReference: reference }), "Payment recorded.");
+        const paise = Math.round(Number(amount) * 100);
+        if (!window.confirm(`Record ₹${amount} received by ${METHODS.find((m) => m[0] === method)?.[1] ?? method} (ref ${reference})? This record cannot be changed later.`)) return;
+        await run(() => adminApi("PATCH", `/api/admin/orders/${orderId}`, { paymentStatus: "paid", reason, paymentReference: reference, offline: { amountPaise: paise, method } }), "Payment recorded.");
       }}
     >
+      <label className="text-[12.5px]">
+        Amount received ₹ (order total ₹{(amountPaise / 100).toFixed(2)})
+        <input className="input mt-1" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+      </label>
+      <label className="text-[12.5px]">
+        Method
+        <select className="input mt-1" value={method} onChange={(e) => setMethod(e.target.value)} required>
+          <option value="">Choose…</option>
+          {METHODS.map(([v, l]) => (
+            <option key={v} value={v}>
+              {l}
+            </option>
+          ))}
+        </select>
+      </label>
       <label className="text-[12.5px]">
         Receipt / UTR / reference
         <input className="input mt-1" value={reference} onChange={(e) => setReference(e.target.value)} minLength={3} maxLength={80} required />
