@@ -9,6 +9,7 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 
 ## M11 (active) — tracker: `docs/M11-RELEASE-READINESS.md`
 - Branch `backend/m11-stabilization`; `backend/development` @ `7448365` (CI 43686097499 green). P0 audit done (F01-F20 labelled). **P1-T1 done** (F03: a status PATCH can no longer mark a gateway payment refunded; ADR 0019). Next: P1-T3 (failed online attempts never expire, F06); P1-T2 is blocked on a business decision.
+- Deployment re-checked 2026-11-20 (tracker §6): production domain public and healthy on `main`'s code; promotion of `e17a1ba` still blocked (no prod Vercel access, prod migrations/backup/isolation unverified, F01/F04-F06 open).
 
 ## Next up
 | Task | Status | Notes |
