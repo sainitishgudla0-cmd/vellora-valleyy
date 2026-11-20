@@ -7,8 +7,14 @@
  *  - The shared-password admin login (P1-T5, F05) is always off in production at runtime. Here: `ADMIN_LEGACY_LOGIN`
  *    may only be unset or `off`; in production a leftover `ADMIN_PASSWORD` is a warning (remove it), and in preview an
  *    enabled legacy login is a warning (turn it off once individual accounts exist).
+ *  - Scheduled jobs (P3-T5, F13): `vercel.json` schedules order expiry, payment reconciliation and the notification outbox
+ *    against routes that answer 404 unless `CRON_SECRET` has 24+ characters. In production a missing/short secret would
+ *    make every job a silent no-op, so the build is refused; in preview it is a warning.
  */
 import { resolveAppEnv, type EnvSource } from "./app-env";
+
+/** Same minimum as the internal job routes (src/app/api/internal/**). */
+export const MIN_CRON_SECRET = 24;
 
 export interface SecurityConfigResult {
   ok: boolean;
@@ -31,6 +37,13 @@ export function checkSecurityConfig(env: EnvSource = process.env): SecurityConfi
   const legacyPassword = !!env.ADMIN_PASSWORD;
   if (appEnv === "production" && legacyPassword) warnings.push("ADMIN_PASSWORD is set in production, where the shared-password login is always disabled. Remove it after confirming an owner account can sign in.");
   if (appEnv === "preview" && legacyPassword && legacyFlag !== "off") warnings.push("The shared-password admin login is enabled in this preview. Set ADMIN_LEGACY_LOGIN=off once individual accounts exist.");
+
+  const cronSecret = env.CRON_SECRET?.trim() ?? "";
+  if (cronSecret.length < MIN_CRON_SECRET) {
+    const msg = `CRON_SECRET is ${cronSecret ? "shorter than 24 characters" : "not set"}: the scheduled jobs (order expiry, payment reconciliation, notifications) would do nothing.`;
+    if (appEnv === "production") issues.push(`${msg} Set a random 24+ character value in the Production scope.`);
+    else if (appEnv === "preview") warnings.push(msg);
+  }
 
   return { ok: issues.length === 0, issues, warnings };
 }

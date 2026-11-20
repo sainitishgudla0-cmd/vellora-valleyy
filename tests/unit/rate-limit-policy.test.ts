@@ -49,7 +49,7 @@ describe("env:check security gate", () => {
     expect(checkSecurityConfig({ VERCEL_ENV: "preview", RATE_LIMIT_STORE: "memory" }).ok).toBe(false);
     expect(checkSecurityConfig({ APP_ENV: "test", RATE_LIMIT_STORE: "memory" }).ok).toBe(true);
     expect(checkSecurityConfig({ APP_ENV: "development", RATE_LIMIT_STORE: "memory" }).ok).toBe(true);
-    expect(checkSecurityConfig({ VERCEL_ENV: "production" }).ok).toBe(true);
+    expect(checkSecurityConfig({ VERCEL_ENV: "production", CRON_SECRET: "c".repeat(32) }).ok).toBe(true);
   });
 
   it("refuses an unknown store value everywhere", () => {

@@ -32,6 +32,22 @@ Operator-only procedures. Agents must not run anything in the "production" secti
 5. **Baseline production:** `APP_ENV=production CONFIRM_PRODUCTION_DB_HOST=<host> prisma migrate resolve --applied 0_init` (records the baseline only; no DDL). `npm run db:migrate:status` then lists the 13 pending migrations; deploy them with `db:migrate:deploy:production` (section below) **before** the app version that needs them.
 6. **Rollback:** baselining writes only the `_prisma_migrations` row. Roll back by deleting that row, or by restoring the Neon backup branch.
 
+## Baselining rehearsal script (M11 P2-T2)
+`TEST_TARGET=disposable APP_ENV=test DATABASE_URL=<disposable> npm run db:baseline-rehearsal` replays steps 3-5 on scratch databases it creates next to the disposable one and drops afterwards: a `main`-shaped database (built from `0_init`) loaded with `main`-era rows for every status/payment combination `main` writes; step 3's diff is empty; `migrate deploy` before baselining fails with P3005 and changes nothing; `resolve --applied 0_init` then `deploy` applies all 13 later migrations; status up to date; no schema diff; every order keeps its id/number/total/statuses; the current client reads them; legacy orders stay `paymentMode` NULL. Then the failure path: an order holding `Pending` (legal in `main`'s text column, not in the enum) makes the M2 migration abort with its pre-check message, the table is untouched, and after fixing the row `migrate resolve --rolled-back 20261112021101_order_payment_enums` + `deploy` completes. Rehearsed 2026-11-20 on Postgres 16.13: 21/21 checks passed. It does **not** replace step 4 on a Neon clone of real production data (operator).
+
+## Release compatibility matrix (M11 P2-T3)
+Measured 2026-11-20 on disposable Postgres 16.13 with each version's own generated Prisma client.
+
+| App \ schema | `main` schema (production today) | migrated (`0_init` + 13) |
+|---|---|---|
+| `main` @ `55aa848` (production today) | works | **broken**: every checkout fails (`Error converting field "status" … expected non-nullable type "String"`; nested order+items create rolls back), the admin order list fails; a single-row order create **commits and then throws**. Catalogue, price/stock edits, enquiries, newsletter still work. |
+| backend (`backend/development`) | **broken**: order and admin queries fail (`Order.paymentMode`, `AdminUser` missing) | works |
+
+Consequences:
+- **The first cutover has no compatible overlap.** Migrate, then build and deploy the backend immediately; ordering is broken for the minutes in between (it cannot be pre-built: its build reads `Variant` columns `main`'s schema lacks). Procedure: `RELEASE.md` B0.
+- **After the cutover, rolling the app back to `main` is not a rollback.** It needs the pre-migration database (Neon branch from B0) and loses anything written since; prefer fixing forward.
+- **Within the backend line** (every migration after M2) migrations are additive, so the previous backend deployment keeps working on the newer schema and Vercel *Promote to Production* of the previous backend deployment is a valid rollback. `tests/unit/migration-safety.test.ts` enforces this: no drop/rename/type change/`SET NOT NULL`/truncate/delete, and no `NOT NULL` column without a default on an existing table, outside pinned exceptions (only the M2 enum cast).
+
 ## Future production migrations
 - Additive migrations only. Destructive steps (drop, rename, type narrowing) need an ADR and an expand → migrate → contract plan across releases.
 - Order: back up (Neon branch) → `db:migrate:deploy:production` → deploy the app version that needs it → `db:schema:diff` = no drift.

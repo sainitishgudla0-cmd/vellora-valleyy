@@ -3,5 +3,10 @@
   "framework": "nextjs",
   "buildCommand": "npm run vercel-build",
   "installCommand": "npm install",
-  "regions": ["sin1"]
+  "regions": ["sin1"],
+  "crons": [
+    { "path": "/api/internal/orders/expire", "schedule": "*/15 * * * *" },
+    { "path": "/api/internal/payments/reconcile", "schedule": "7,22,37,52 * * * *" },
+    { "path": "/api/internal/outbox/process", "schedule": "*/10 * * * *" }
+  ]
 }
