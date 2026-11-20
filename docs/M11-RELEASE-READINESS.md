@@ -98,7 +98,7 @@ All must have evidence; CI green alone is never enough. ☐ all High findings fi
 - **Limits:** grace counts from the first failure (a repeat failure writes no event); expiry/reconcile run only on the P3-T5 crons with `CRON_SECRET` set; verified against `tests/support/fake-razorpay.ts` only (F20, real test-mode run P6-T2).
 
 ### Parallel-session note (2026-11-20)
-P1-T3 (F06) was implemented in a second session in the main checkout and is integrated separately (ADR 0020). Everything below was built in a separate worktree on `m11b/work`, pushed as `backend/m11-security-ops`, so the two never shared a working tree or database. Integration order into `backend/m11-stabilization`/`backend/development` is the owner's decision (pending).
+P1-T3 (F06) was implemented in a second session in the main checkout and is integrated separately (ADR 0020). Everything below was built in a separate worktree on `m11b/work`, pushed as `backend/m11-security-ops`, so the two never shared a working tree or database. The owner chose this stack first: `backend/m11-stabilization` and `backend/development` fast-forwarded to `64d5b26` on 2026-11-20 (CI runs 44789949597 / 44791463928); P1-T3 then landed on top as `95e1323` (CI 44791548874 / 44793165095). Final state and links: `M11-RC-REPORT.md`.
 
 ### P1-T4 — critical audit fails closed (F07), `b80e6dd`
 - **Fix:** `writeAuditTx(tx, …)` (never swallowed) for the successes of `order.update`, `order.refund.requested` (committed with the `Refund` row, before the gateway call), `user.create`, `user.update`, `user.password_reset`, `password.change`, `owner.recover`; library functions take a required actor; rejections/denials/logins stay best-effort. Ratchet `audit-critical-ratchet.test.ts`. ADR 0021.
