@@ -3,7 +3,7 @@ import { log } from "@/lib/log";
 import { db } from "@/lib/db";
 import type { PaymentConfig } from "@/lib/env/payment-config";
 import { cancelAfterGatewayFailure } from "./checkout";
-import { applyGatewayPayment } from "./razorpay-verify";
+import { applyGatewayPayment, recordOrphanCapture } from "./razorpay-verify";
 import { createRazorpayProvider, GatewayError, type RazorpayGateway } from "./providers/razorpay";
 import { ORPHAN_REASONS, settleFullRefund, upsertRefundFromGateway } from "./refunds";
 
@@ -108,7 +108,56 @@ export interface RefundReconcileSummary {
 
 export interface GatewayReconcileSummary extends ReconcileSummary {
   swept: number;
+  lateCaptures: number;
   refunds: RefundReconcileSummary;
+}
+
+/** How long after a payment-window expiry the gateway is still asked about late captures (slow UPI/netbanking approvals). */
+export const LATE_CAPTURE_LOOKBACK_MS = 24 * 3600_000;
+
+/**
+ * M11 P1-T3 (F06): an order cancelled by payment-window expiry can still receive money (a "created" payment approved
+ * minutes later) while the webhook is missed and the browser is gone. Asks the gateway about such orders, at most once
+ * per STALE_AWAITING_MS for LATE_CAPTURE_LOOKBACK_MS, and records any captured payment as an orphan capture for an owner
+ * to refund. Never re-opens the order or re-reserves stock. Returns how many captures were newly recorded.
+ */
+export async function checkExpiredForLateCaptures(config: PaymentConfig, opts: { now?: Date; limit?: number } = {}): Promise<{ lateCaptures: number; errors: number }> {
+  const out = { lateCaptures: 0, errors: 0 };
+  if (config.mode !== "razorpay_test" && config.mode !== "razorpay_live") return out;
+  const now = opts.now ?? new Date();
+  const recheckBefore = new Date(now.getTime() - STALE_AWAITING_MS);
+  const attempts = await db.payment.findMany({
+    where: {
+      provider: "razorpay",
+      mode: config.mode,
+      status: "failed",
+      providerPaymentId: null,
+      providerOrderId: { not: null },
+      OR: [{ lastCheckedAt: null }, { lastCheckedAt: { lt: recheckBefore } }],
+      order: { status: "cancelled", paymentMode: config.mode, events: { some: { actorType: "system", actorId: "expiry", toStatus: "cancelled", createdAt: { gt: new Date(now.getTime() - LATE_CAPTURE_LOOKBACK_MS) } } } },
+    },
+    include: { order: { select: { number: true } } },
+    orderBy: { createdAt: "asc" },
+    take: opts.limit ?? 50,
+  });
+  if (!attempts.length) return out;
+  const provider = createRazorpayProvider(config);
+  for (const a of attempts) {
+    try {
+      const captured = (await provider.gateway.listOrderPayments(a.providerOrderId!)).filter((p) => p.orderId === a.providerOrderId && p.status === "captured");
+      for (const gp of captured) {
+        if (await db.payment.findUnique({ where: { providerPaymentId: gp.id }, select: { id: true } })) continue; // already recorded (webhook, verify or an earlier run)
+        await recordOrphanCapture(a, gp, "captured_on_cancelled_order");
+        out.lateCaptures++;
+        log.error("reconcile.late_capture", { order: a.order.number });
+      }
+      await db.payment.updateMany({ where: { id: a.id, status: "failed" }, data: { lastCheckedAt: now } });
+    } catch (e) {
+      out.errors++;
+      log.error("reconcile.late_capture_check_failed", { order: a.order.number, reason: e instanceof GatewayError ? e.kind : "unexpected" });
+    }
+  }
+  return out;
 }
 
 /** Flags stale unflagged attempts so the main pass looks at them. Returns how many were flagged. */
@@ -201,10 +250,11 @@ export async function auditRefunds(config: PaymentConfig, opts: { days?: number;
   return out;
 }
 
-/** One scheduled cycle: flag stale payments, resolve flagged attempts, settle refunds. Counts only. */
+/** One scheduled cycle: flag stale payments, resolve flagged attempts, look for captures after expiry, settle refunds. Counts only. */
 export async function reconcileGateway(config: PaymentConfig, opts: { now?: Date; limit?: number } = {}): Promise<GatewayReconcileSummary> {
   const swept = await sweepStaleAwaitingPayments(config, opts);
   const payments = await reconcilePendingPayments(config, opts);
+  const late = await checkExpiredForLateCaptures(config, opts);
   const refunds = await reconcileRefunds(config, opts);
-  return { ...payments, swept, refunds };
+  return { ...payments, errors: payments.errors + late.errors, swept, lateCaptures: late.lateCaptures, refunds };
 }

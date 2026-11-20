@@ -1,12 +1,13 @@
 import "server-only";
 import { log } from "@/lib/log";
-import { Prisma, type PaymentStatus } from "@prisma/client";
+import { Prisma, type Payment, type PaymentStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import type { PaymentConfig } from "@/lib/env/payment-config";
 import { transitionOrder } from "@/lib/orders/state-machine";
 import { matchesOrder, PAYABLE_PAYMENT_STATUSES, type VerifyInput } from "@/lib/payment-verification";
 import { flagForReconciliation } from "./checkout";
 import { createRazorpayProvider, GatewayError, type GatewayPayment } from "./providers/razorpay";
+import type { OrphanReason } from "./refunds";
 
 /**
  * Razorpay checkout verification (M2-T5, ADR 0009). A browser-supplied signature is necessary but never
@@ -100,7 +101,7 @@ export async function verifyRazorpayCheckout(input: VerifyInput & { orderNumber:
 
 export interface ApplyInput {
   order: { id: string; number: string; paymentStatus: PaymentStatus; total: number };
-  attempt: { id: string; amount: number };
+  attempt: Pick<Payment, "id" | "amount" | "orderId" | "provider" | "mode" | "providerOrderId">;
   gp: GatewayPayment;
   expectedOrderId: string;
 }
@@ -112,8 +113,13 @@ export async function applyGatewayPayment({ order, attempt, gp, expectedOrderId 
     return conflict(order.number, "gateway_mismatch");
   }
   switch (gp.status) {
-    case "captured":
-      return markPaid(order, attempt, gp.id);
+    case "captured": {
+      const r = await markPaid(order, attempt, gp.id);
+      // Captured money that could not be applied (the order was cancelled or paid by another payment while we looked,
+      // e.g. a payment window expiry winning the race, F06) is kept for a human to refund, never dropped.
+      if (r.kind === "conflict" && (r.reason === "not_payable" || r.reason === "stale")) await keepUnappliedCapture(order, attempt, gp);
+      return r;
+    }
     case "failed":
       return markFailed(order, attempt);
     case "refunded":
@@ -182,6 +188,28 @@ async function markFailed(order: ApplyInput["order"], attempt: { id: string }): 
     }
   }
   return { kind: "payment_failed" };
+}
+
+async function keepUnappliedCapture(order: ApplyInput["order"], attempt: ApplyInput["attempt"], gp: GatewayPayment) {
+  const now = await db.order.findUnique({ where: { id: order.id }, select: { status: true, paymentStatus: true } });
+  const reason: OrphanReason = now?.paymentStatus === "paid" || now?.paymentStatus === "refunded" ? "duplicate_capture" : now?.status === "cancelled" ? "captured_on_cancelled_order" : "captured_on_non_payable_order";
+  await recordOrphanCapture(attempt, gp, reason);
+  log.error("payments.orphan_capture", { order: order.number, reason });
+}
+
+/**
+ * Keep a record of a captured gateway payment that cannot be applied to its order: a `Payment` row (unique by
+ * gateway payment id, so a redelivery is a no-op) with the captured amount, flagged for a human. `refunds.ts`
+ * treats it as refundable; reconciliation and expiry ignore it.
+ */
+export async function recordOrphanCapture(attempt: Pick<Payment, "orderId" | "provider" | "mode" | "providerOrderId">, gp: GatewayPayment, reason: OrphanReason) {
+  try {
+    await db.payment.create({
+      data: { orderId: attempt.orderId, provider: attempt.provider, mode: attempt.mode, providerOrderId: attempt.providerOrderId, providerPaymentId: gp.id, amount: gp.amount, currency: gp.currency, status: "unpaid", needsReconciliation: true, reconcileReason: reason },
+    });
+  } catch (e) {
+    if (!(e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")) throw e;
+  }
 }
 
 function conflict(orderNumber: string, reason: RazorpayVerifyConflict): RazorpayVerifyResult {

@@ -7,7 +7,7 @@ import { errorName, log } from "@/lib/log";
 import { PAYABLE_PAYMENT_STATUSES } from "@/lib/payment-verification";
 import type { GatewayPayment, GatewayRefund } from "./providers/razorpay";
 import { verifyWebhookSignatureWith } from "./providers/razorpay";
-import { applyGatewayPayment } from "./razorpay-verify";
+import { applyGatewayPayment, recordOrphanCapture } from "./razorpay-verify";
 import { settleFullRefund, upsertRefundFromGateway, type OrphanReason } from "./refunds";
 
 /**
@@ -199,19 +199,4 @@ async function onRefund(entity: z.infer<typeof refundEntity>, config: PaymentCon
   const outcome = await upsertRefundFromGateway(payment, gr);
   await settleFullRefund(payment.id);
   return outcome === "mismatch" ? "ledger_mismatch" : outcome === "unchanged" ? "refund_unchanged" : "refund_recorded";
-}
-
-/**
- * Keep a record of a captured gateway payment that cannot be applied to its order: a `Payment` row (unique by
- * gateway payment id, so a redelivery is a no-op) with the captured amount, flagged for a human. `refunds.ts`
- * treats it as refundable; reconciliation ignores it.
- */
-export async function recordOrphanCapture(attempt: Pick<Payment, "orderId" | "provider" | "mode" | "providerOrderId">, gp: GatewayPayment, reason: OrphanReason) {
-  try {
-    await db.payment.create({
-      data: { orderId: attempt.orderId, provider: attempt.provider, mode: attempt.mode, providerOrderId: attempt.providerOrderId, providerPaymentId: gp.id, amount: gp.amount, currency: gp.currency, status: "unpaid", needsReconciliation: true, reconcileReason: reason },
-    });
-  } catch (e) {
-    if (!(e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")) throw e;
-  }
 }

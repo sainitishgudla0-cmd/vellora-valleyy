@@ -140,7 +140,7 @@ describe("reconciliation (M10-T3)", () => {
     const ok = await cron("Bearer cron-secret-for-tests-0123456789abcdef");
     expect(ok.status).toBe(200);
     const body = (await ok.json()) as Record<string, unknown>;
-    expect(body).toMatchObject({ ok: true, mode: "razorpay_test", refunds: expect.any(Object) });
+    expect(body).toMatchObject({ ok: true, mode: "razorpay_test", swept: expect.any(Number), lateCaptures: expect.any(Number), refunds: expect.any(Object) });
     for (const v of Object.values(body)) expect(["boolean", "number", "string", "object"]).toContain(typeof v);
     vi.stubEnv("PAYMENT_MODE", "request_only");
     expect((await cron("Bearer cron-secret-for-tests-0123456789abcdef")).status).toBe(200); // no Razorpay mode: nothing to reconcile
