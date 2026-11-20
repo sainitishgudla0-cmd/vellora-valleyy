@@ -6,6 +6,7 @@ import { resolvePaymentConfig, PaymentConfigError } from "../src/lib/env/payment
 import { NotifyConfigError, resolveNotifyConfig } from "../src/lib/env/notify-config";
 import { OtpConfigError, resolveOtpConfig } from "../src/lib/env/otp-config";
 import { checkDatabaseIsolation } from "../src/lib/env/isolation";
+import { checkSecurityConfig } from "../src/lib/env/security-config";
 import { loadLocalEnv } from "./lib/safety";
 
 loadLocalEnv();
@@ -44,6 +45,19 @@ try {
     process.exit(1);
   }
   console.log("[check-env] database isolation ok");
+} catch (e) {
+  console.error(`[check-env] ${e}`);
+  process.exit(1);
+}
+
+try {
+  const sec = checkSecurityConfig();
+  for (const w of sec.warnings) console.warn(`[check-env] warning: ${w}`);
+  if (!sec.ok) {
+    console.error(`[check-env] ${sec.issues.join("\n[check-env] ")}`);
+    process.exit(1);
+  }
+  console.log("[check-env] security configuration ok");
 } catch (e) {
   console.error(`[check-env] ${e}`);
   process.exit(1);

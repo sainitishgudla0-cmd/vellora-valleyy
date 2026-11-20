@@ -56,11 +56,19 @@ describe("shared rate limiter (M9-T4)", () => {
     expect((await db.rateLimitBucket.findUnique({ where: { key: `${P}c` } }))?.count).toBe(3);
   });
 
-  it("falls back to a per-instance limit (and warns once) when the database is unavailable", async () => {
+  it("fail-closed buckets (the default) refuse every request while the database is unavailable (M11 P1-T6)", async () => {
+    const broken = { $queryRaw: vi.fn().mockRejectedValue(new Error("connect ECONNREFUSED")), rateLimitBucket: db.rateLimitBucket } as never;
+    expect(await consume(broken, `${P}c`, 5, 60_000)).toBe(false);
+    expect(await consume(broken, `${P}c`, 5, 60_000, "closed")).toBe(false);
+    // and recover as soon as the database answers again
+    expect(await consume(db, `${P}c`, 5, 60_000, "closed")).toBe(true);
+  });
+
+  it("fail-open buckets fall back to a per-instance limit (and warn once) when the database is unavailable", async () => {
     const records: LogRecord[] = [];
     setLogSink((r) => records.push(r));
     const broken = { $queryRaw: vi.fn().mockRejectedValue(new Error("connect ECONNREFUSED")), rateLimitBucket: db.rateLimitBucket } as never;
-    const r = [await consume(broken, `${P}f`, 2, 60_000), await consume(broken, `${P}f`, 2, 60_000), await consume(broken, `${P}f`, 2, 60_000)];
+    const r = [await consume(broken, `${P}f`, 2, 60_000, "open"), await consume(broken, `${P}f`, 2, 60_000, "open"), await consume(broken, `${P}f`, 2, 60_000, "open")];
     setLogSink(null);
     expect(r).toEqual([true, true, false]); // still limited, never fail-open
     expect(records.filter((x) => x.event === "rate_limit.database_unavailable").length).toBeLessThanOrEqual(1);

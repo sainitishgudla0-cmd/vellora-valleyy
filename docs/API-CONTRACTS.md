@@ -2,6 +2,8 @@
 
 Canonical inventory of `src/app/api/**`. Update this file in the same commit as any contract change. Money is integer **paise**. Errors are `{ error: string, fields?: Record<string,string> }` (`src/lib/api.ts`); 422 means Zod validation, with `fields`.
 
+**Rate limits (M9-T4, M11 P1-T6, ADR 0022):** per-IP fixed windows shared across instances through Postgres. If that store is unreachable, credential, one-time-code, payment, order, account and wholesale-write routes answer `429` (fail closed); only the public delivery quote, invoice download, enquiry and newsletter routes fall back to per-instance counters. Policy table: `RATE_LIMIT_POLICY` in `src/lib/rate-limit.ts`.
+
 ## Public
 
 ### `GET /api/products`

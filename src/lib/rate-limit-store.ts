@@ -8,9 +8,15 @@ import { log, errorName } from "@/lib/log";
  *
  * `database` (default): one atomic INSERT … ON CONFLICT DO UPDATE per request on `RateLimitBucket`, so every
  * server instance shares the same counters and N parallel requests can never let more than `limit` through.
- * `memory`: per-instance Map (RATE_LIMIT_STORE=memory); used as the automatic fallback if the database is
- * unreachable, so a database hiccup degrades to the old per-instance behaviour instead of blocking customers
- * (or removing the limit altogether).
+ * `memory`: per-instance Map (RATE_LIMIT_STORE=memory, development/test only: `env:check` refuses it in
+ * preview/production).
+ *
+ * When the database store fails (M11 P1-T6, finding F08), the caller's fail mode decides:
+ *  - `closed` (default; sign-in, one-time codes, payments, orders, account and wholesale writes): the request is
+ *    refused. A per-instance counter would multiply the limit by the number of instances, which is exactly the
+ *    protection these routes need.
+ *  - `open` (public, low-value reads and contact forms): degrades to the per-instance counter, so a database hiccup
+ *    does not take the storefront down.
  *
  * Timestamps are written as UTC wall-clock via `::timestamptz AT TIME ZONE 'UTC'`, so the result does not depend
  * on the database session time zone (the M7 outbox bug).
@@ -63,7 +69,9 @@ export function bucketKey(bucket: string, ip: string, secret = process.env.SESSI
 
 let lastFallbackLog = 0;
 
-export async function consume(client: Db, key: string, limit: number, windowMs: number): Promise<boolean> {
+export type FailMode = "open" | "closed";
+
+export async function consume(client: Db, key: string, limit: number, windowMs: number, failMode: FailMode = "closed"): Promise<boolean> {
   if (process.env.RATE_LIMIT_STORE?.trim() === "memory") return consumeMemory(key, limit, windowMs).allowed;
   try {
     const d = await consumeShared(client, key, limit, windowMs);
@@ -73,8 +81,9 @@ export async function consume(client: Db, key: string, limit: number, windowMs: 
     const t = Date.now();
     if (t - lastFallbackLog > 60_000) {
       lastFallbackLog = t;
-      log.warn("rate_limit.database_unavailable", { errorName: errorName(e), effect: "per-instance fallback" });
+      log.warn("rate_limit.database_unavailable", { errorName: errorName(e), effect: failMode === "closed" ? "refusing fail-closed buckets; per-instance fallback for the rest" : "per-instance fallback" });
     }
+    if (failMode === "closed") return false;
     return consumeMemory(key, limit, windowMs).allowed;
   }
 }

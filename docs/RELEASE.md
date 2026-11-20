@@ -24,7 +24,7 @@ Follow "Production baselining" in `RUNBOOK-DATABASE.md` step by step. Agent role
 | `CUSTOMER_OTP_MODE`, `NOTIFY_MODE` | unset (off) | unset (off) | mock modes are refused in preview/production |
 | `SESSION_SECRET`, `CRON_SECRET` | set, random, different per scope | set | `SESSION_SECRET` also keys the rate-limit IP hashes |
 | `SELLER_GSTIN` | set when invoices start | — | with accountant-approved `TaxRate` rows |
-| `RATE_LIMIT_STORE` | unset (database) | unset | `memory` only to debug |
+| `RATE_LIMIT_STORE` | unset (database) | unset | `memory` only to debug locally; `env:check` refuses it in preview/production (M11 P1-T6) |
 | `LOG_LEVEL` | unset (info) | unset | `debug` temporarily if needed |
 
 ### A3. Preview isolation check (M9-T2, operator)
