@@ -19,5 +19,6 @@ export async function POST(req: Request) {
   const r = await issueOtp(parsed.data.email);
   if (r.ok) return json({ ok: true, message: "If the address is valid, a sign-in code is on its way." }, 202);
   if (r.reason === "unavailable") return fail("Sign-in by email is not available yet.", 503);
+  if (r.reason === "send_failed") return NextResponse.json({ error: "We could not send the code just now. Please try again in a minute." }, { status: 503, headers: { "Retry-After": String(r.retryAfterS ?? 60) } });
   return NextResponse.json({ error: "Please wait before asking for another code." }, { status: 429, headers: { "Retry-After": String(r.retryAfterS ?? 60) } });
 }

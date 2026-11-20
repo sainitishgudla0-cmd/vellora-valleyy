@@ -1,11 +1,12 @@
 import "server-only";
 import { log } from "@/lib/log";
 import { NotifyConfigError, resolveNotifyConfig } from "@/lib/env/notify-config";
+import { sendSmtp } from "./smtp";
 
 /**
- * Email delivery (M7-T5). The only provider today is a MOCK with NO network code at all: it appends to an in-process mailbox.
- * Nothing can reach a real recipient from development or test; in preview/production `currentEmailProvider()` returns null
- * (notifications are off) until a real adapter is written and the config allows it.
+ * Email delivery (M7-T5, M11 P3-T1). Providers: the MOCK (no network code; an in-process mailbox, development/test only) and
+ * SMTP (`NOTIFY_MODE=smtp`, `smtp.ts`) to whichever provider the business configures. With `NOTIFY_MODE` unset or invalid,
+ * `currentEmailProvider()` returns null and nothing is queued or sent.
  */
 export interface OutgoingEmail {
   to: string;
@@ -17,7 +18,7 @@ export interface OutgoingEmail {
 }
 
 export interface EmailProvider {
-  readonly id: "mock";
+  readonly id: "mock" | "smtp";
   send(mail: OutgoingEmail): Promise<void>;
 }
 
@@ -49,7 +50,13 @@ const mock: EmailProvider = {
 
 export function currentEmailProvider(): EmailProvider | null {
   try {
-    return resolveNotifyConfig().mode === "mock" ? mock : null;
+    const c = resolveNotifyConfig();
+    if (c.mode === "mock") return mock;
+    if (c.mode === "smtp" && c.smtp) {
+      const smtp = c.smtp;
+      return { id: "smtp", send: (mail) => sendSmtp(smtp, mail) };
+    }
+    return null;
   } catch (e) {
     if (!(e instanceof NotifyConfigError)) throw e;
     log.error("notify.config_invalid", { detail: e.message, effect: "notifications disabled" });

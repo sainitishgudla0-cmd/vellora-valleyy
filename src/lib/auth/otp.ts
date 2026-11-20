@@ -1,6 +1,7 @@
 import "server-only";
 import crypto from "node:crypto";
 import { db } from "@/lib/db";
+import { errorName, log } from "@/lib/log";
 import { createCustomerSession, keyedHash } from "./customer";
 import { currentOtpSender } from "./otp-sender";
 import { PRIVACY_NOTICE_VERSION } from "@/lib/account/consent";
@@ -24,7 +25,7 @@ const emailHash = (email: string) => keyedHash("customer-email", email);
 const codeHash = (eh: string, code: string) => keyedHash("customer-otp", `${eh}:${code}`);
 const safeEqualHex = (a: string, b: string) => a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
-export type IssueResult = { ok: true } | { ok: false; reason: "unavailable" | "cooldown" | "too_many"; retryAfterS?: number };
+export type IssueResult = { ok: true } | { ok: false; reason: "unavailable" | "cooldown" | "too_many" | "send_failed"; retryAfterS?: number };
 
 export async function issueOtp(emailInput: string, now = new Date()): Promise<IssueResult> {
   const sender = currentOtpSender();
@@ -37,11 +38,18 @@ export async function issueOtp(emailInput: string, now = new Date()): Promise<Is
   if (sinceLast < RESEND_COOLDOWN_S) return { ok: false, reason: "cooldown", retryAfterS: Math.ceil(RESEND_COOLDOWN_S - sinceLast) };
 
   const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
-  await db.$transaction([
+  const [, challenge] = await db.$transaction([
     db.otpChallenge.updateMany({ where: { emailHash: eh, consumedAt: null }, data: { consumedAt: now } }), // only the newest code is live
     db.otpChallenge.create({ data: { emailHash: eh, codeHash: codeHash(eh, code), expiresAt: new Date(now.getTime() + OTP_TTL_MS) } }),
   ]);
-  await sender.send({ email, code });
+  try {
+    await sender.send({ email, code });
+  } catch (e) {
+    // M11 P3-T1: a code that never left is removed (it must not count against the customer's limits); never reported as sent
+    await db.otpChallenge.deleteMany({ where: { id: challenge.id } });
+    log.error("otp.send_failed", { sender: sender.id, errorName: errorName(e), kind: e instanceof Error ? e.message.slice(0, 40) : "unknown" });
+    return { ok: false, reason: "send_failed", retryAfterS: 60 };
+  }
   await db.otpChallenge.deleteMany({ where: { expiresAt: { lt: new Date(now.getTime() - 24 * 3600_000) } } }); // housekeeping
   return { ok: true };
 }

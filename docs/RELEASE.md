@@ -28,7 +28,9 @@ Use when the only owner is locked out, deactivated, has forgotten the password, 
 | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` | `rzp_live_...` at launch only | `rzp_test_...` | live keys outside Production are refused by `env:check` |
 | `RAZORPAY_WEBHOOK_SECRET` | the live webhook's secret (16+ chars) | the test webhook's secret | **not** the key secret; required for `razorpay_live`; without it the webhook answers 503 |
 | `RAZORPAY_LIVE_ENABLED` | `true` only on launch day | unset | the explicit launch switch; unsetting it (with `PAYMENT_MODE`) is the rollback |
-| `CUSTOMER_OTP_MODE`, `NOTIFY_MODE` | unset (off) | unset (off) | mock modes are refused in preview/production |
+| `CUSTOMER_OTP_MODE`, `NOTIFY_MODE` | unset (off) until the provider is set up; then `email` / `smtp` | unset, or `email` / `smtp` with a test mailbox | mock modes are refused in preview/production (M11 P3-T1, ADR 0023) |
+| `SMTP_URL` | `smtps://USER:PASS@host:465` (or `smtp://…:587`, STARTTLS enforced) from the chosen email provider | the provider's sandbox/test credentials | **secret**; URL-encode the password; credentials required outside dev/test |
+| `EMAIL_FROM` | e.g. `Velora Valley <orders@your-domain>` on a domain verified with the provider (SPF/DKIM) | same | business decision: sender name and address |
 | `SESSION_SECRET`, `CRON_SECRET` | set, random, different per scope | set | `SESSION_SECRET` also keys the rate-limit IP hashes |
 | `SELLER_GSTIN` | set when invoices start | — | with accountant-approved `TaxRate` rows |
 | `RATE_LIMIT_STORE` | unset (database) | unset | `memory` only to debug locally; `env:check` refuses it in preview/production (M11 P1-T6) |

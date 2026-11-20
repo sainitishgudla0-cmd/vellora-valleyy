@@ -8,7 +8,7 @@ describe("customer OTP configuration (fails closed)", () => {
   const cfg = (env: Record<string, string>) => resolveOtpConfig(env);
   it("is off by default and warns outside development/test", () => {
     expect(cfg({ APP_ENV: "development" })).toMatchObject({ mode: "off", warnings: [] });
-    expect(cfg({ APP_ENV: "production" }).warnings.join()).toMatch(/disabled until a real OTP sender/);
+    expect(cfg({ APP_ENV: "production" }).warnings.join()).toMatch(/disabled until a real sender is configured \(CUSTOMER_OTP_MODE=email\)/);
   });
   it.each(["development", "test"])("allows the mock sender in %s", (appEnv) => {
     expect(cfg({ APP_ENV: appEnv, CUSTOMER_OTP_MODE: "mock" }).mode).toBe("mock");
