@@ -58,12 +58,12 @@ describe("PATCH /api/admin/orders/[id] enum boundary", () => {
 
   it.each(LEGACY_STATUS)("accepts status %s", async (status) => {
     expect((await call({ status })).status).toBe(200);
-    expect(svc.updateOrderAsAdmin).toHaveBeenCalledWith({ orderId: "o1", adminId: "admin-1", status });
+    expect(svc.updateOrderAsAdmin).toHaveBeenCalledWith({ orderId: "o1", adminId: "admin-1", status, audit: ADMIN.admin });
   });
 
   it.each(LEGACY_PAYMENT_STATUS)("accepts paymentStatus %s", async (paymentStatus) => {
     expect((await call({ paymentStatus, reason: "r" })).status).toBe(200);
-    expect(svc.updateOrderAsAdmin).toHaveBeenCalledWith({ orderId: "o1", adminId: "admin-1", paymentStatus, reason: "r" });
+    expect(svc.updateOrderAsAdmin).toHaveBeenCalledWith({ orderId: "o1", adminId: "admin-1", paymentStatus, reason: "r", audit: ADMIN.admin });
   });
 
   it.each([{ status: "shipped" }, { status: "PAID" }, { status: " paid" }, { status: "" }, { status: null }, { paymentStatus: "settled" }, { paymentStatus: "Unpaid" }, { reason: "x".repeat(501) }, { paymentReference: "x".repeat(81) }])(

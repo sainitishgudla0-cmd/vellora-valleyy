@@ -21,7 +21,7 @@ export function ensureSessionSecret() {
 export async function createTestAdmin(role: AdminRole = "owner", over: { email?: string; name?: string } = {}) {
   ensureSessionSecret();
   const email = over.email ?? `${role}-${tag}-${++seq}@${FIXTURE_EMAIL_DOMAIN}`;
-  const r = await createUser({ email, name: over.name ?? `Fixture ${role}`, role, password: TEST_ADMIN_PASSWORD });
+  const r = await createUser({ email, name: over.name ?? `Fixture ${role}`, role, password: TEST_ADMIN_PASSWORD }, { userId: null, label: "test-fixture", role: "owner" });
   if (!r.ok) throw new Error(`fixture admin: ${r.message}`);
   const token = await createSession({ userId: r.user.id });
   const session = await db.adminSession.findFirstOrThrow({ where: { userId: r.user.id }, orderBy: { createdAt: "desc" } });

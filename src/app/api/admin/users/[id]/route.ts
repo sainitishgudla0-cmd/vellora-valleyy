@@ -26,26 +26,25 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const fields = Object.keys(parsed.data);
   if (fields.length === 0) return fail("Nothing to change", 422);
 
-  const audit = (outcome: "success" | "rejected", extra: Record<string, unknown>) =>
-    writeAudit({ action: "user.update", outcome, admin: auth.admin, targetType: "admin_user", targetId: id, details: { fields, ...extra } });
+  // Successes are audited inside each change's transaction (P1-T4); only rejections are written here, best-effort.
+  const rejected = (code: string) => writeAudit({ action: "user.update", outcome: "rejected", admin: auth.admin, targetType: "admin_user", targetId: id, details: { fields, code } });
 
   let sessionsRevoked = 0;
   if (Object.keys(patch).length > 0) {
-    const r = await updateUser(id, patch);
+    const r = await updateUser(id, patch, auth.admin);
     if (!r.ok) {
-      await audit("rejected", { code: r.code });
+      await rejected(r.code);
       return r.code === "not_found" ? fail(r.message, 404) : Response.json({ error: r.message, code: r.code }, { status: 409 });
     }
     sessionsRevoked += r.sessionsRevoked;
   }
   if (password !== undefined) {
-    const r = await resetPassword(id, password);
+    const r = await resetPassword(id, password, auth.admin);
     if (!r.ok) {
-      await audit("rejected", { code: r.code });
+      await rejected(r.code);
       return r.code === "not_found" ? fail(r.message, 404) : fail(r.message, 422, { password: r.message });
     }
     sessionsRevoked += r.sessionsRevoked;
   }
-  await audit("success", { sessionsRevoked });
   return json({ ok: true, sessionsRevoked });
 }

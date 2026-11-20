@@ -33,7 +33,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const parsed = await parseBody(req, schema);
   if ("response" in parsed) return parsed.response;
 
-  const r = await createRefund({ orderId: id, ...parsed.data, adminId: auth.admin.actorId }, safePaymentConfig());
+  const r = await createRefund({ orderId: id, ...parsed.data, adminId: auth.admin.actorId, audit: auth.admin }, safePaymentConfig());
   // ids and codes only: the reason lives on the Refund row
   const base = { action: "order.refund", admin: auth.admin, targetType: "order", targetId: id } as const;
   if (r.ok) {

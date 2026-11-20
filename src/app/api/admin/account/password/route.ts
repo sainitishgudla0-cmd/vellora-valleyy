@@ -16,11 +16,10 @@ export async function POST(req: Request) {
   if (!(await rateLimit("admin-password", 8, 15 * 60_000))) return fail("Too many attempts. Try again later.", 429);
   const parsed = await parseBody(req, schema);
   if ("response" in parsed) return parsed.response;
-  const r = await changeOwnPassword(admin.userId, parsed.data.currentPassword, parsed.data.newPassword, admin.sessionId);
+  const r = await changeOwnPassword(admin.userId, parsed.data.currentPassword, parsed.data.newPassword, admin.sessionId, admin);
   if (!r.ok) {
     await writeAudit({ action: "password.change", outcome: "rejected", admin, details: { code: r.code } });
     return r.code === "wrong_password" ? fail(r.message, 422, { currentPassword: r.message }) : fail(r.message, 422, { newPassword: r.message });
   }
-  await writeAudit({ action: "password.change", outcome: "success", admin, details: { sessionsRevoked: r.sessionsRevoked } });
   return json({ ok: true, sessionsRevoked: r.sessionsRevoked });
 }

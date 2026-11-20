@@ -1,6 +1,7 @@
 import "server-only";
 import { Prisma, type Refund, type RefundStatus } from "@prisma/client";
 import { db } from "@/lib/db";
+import { writeAuditTx, type AuditActor } from "@/lib/auth/audit";
 import { errorName, log } from "@/lib/log";
 import type { PaymentConfig } from "@/lib/env/payment-config";
 import { transitionOrder } from "@/lib/orders/state-machine";
@@ -147,6 +148,8 @@ export interface CreateRefundInput {
   /** Needed only when the order has several captured payments (e.g. a duplicate capture). */
   paymentId?: string;
   adminId: string;
+  /** recorded on the `order.refund.requested` audit row committed with the ledger row (M11 P1-T4) */
+  audit: AuditActor;
 }
 
 export type RefundErrorCode = "not_found" | "unavailable" | "not_refundable" | "exceeds_refundable" | "fully_refunded" | "key_reused" | "gateway_rejected" | "gateway_unknown";
@@ -189,6 +192,8 @@ export async function createRefund(input: CreateRefundInput, config: PaymentConf
       if (!Number.isInteger(amount) || amount <= 0) return { blocked: no("exceeds_refundable", "Refund amount must be a positive whole number of paise", { remaining: balance }) };
       if (amount > balance) return { blocked: no("exceeds_refundable", "The amount is more than the refundable balance", { remaining: balance }) };
       const created = await tx.refund.create({ data: { orderId: order.id, paymentId: fresh.id, amount, currency: "INR", status: "pending", source: "admin", reason: input.reason.trim(), requestedBy: input.adminId, requestKey: input.requestKey } });
+      // evidence of who asked for the money to move, committed with the ledger row and before the gateway call
+      await writeAuditTx(tx, { action: "order.refund.requested", outcome: "success", admin: input.audit, targetType: "order", targetId: order.id, details: { refundId: created.id, paymentId: fresh.id, amountPaise: amount } });
       return { created };
     });
     if ("blocked" in reserved && reserved.blocked) return reserved.blocked;

@@ -1,6 +1,7 @@
 import "server-only";
 import { Prisma, type OrderStatus, type PaymentStatus } from "@prisma/client";
 import { db } from "@/lib/db";
+import { writeAuditTx, type AuditActor } from "@/lib/auth/audit";
 import { transitionOrder, validateTransition, type TransitionErrorCode } from "./state-machine";
 
 /**
@@ -15,6 +16,7 @@ import { transitionOrder, validateTransition, type TransitionErrorCode } from ".
  *    gateway was returned outside it. Gateway refunds go only through `src/lib/payments/refunds.ts` (M11 P1-T1).
  *  Anything else is refused. Orders without a recorded mode (legacy) or without a payment record cannot have
  *  their payment edited here: they need operator reconciliation.
+ * A successful change writes its `order.update` audit row in the same transaction (M11 P1-T4): no audit, no change.
  */
 export interface AdminOrderUpdate {
   orderId: string;
@@ -23,6 +25,8 @@ export interface AdminOrderUpdate {
   reason?: string;
   paymentReference?: string;
   adminId?: string;
+  /** who is recorded on the audit row written with the change */
+  audit: AuditActor;
 }
 
 export type AdminUpdateCode = TransitionErrorCode | "payment_edit_not_allowed" | "no_payment_record" | "reference_in_use";
@@ -94,6 +98,7 @@ export async function updateOrderAsAdmin(input: AdminOrderUpdate): Promise<Admin
         tx,
       );
       if (!moved.ok) throw new Abort(no(moved.code, moved.message));
+      await writeAuditTx(tx, { action: "order.update", outcome: "success", admin: input.audit, targetType: "order", targetId: order.id, details: { status: input.status, paymentStatus: input.paymentStatus, changed: true } });
     });
     return { ok: true, changed: true };
   } catch (e) {

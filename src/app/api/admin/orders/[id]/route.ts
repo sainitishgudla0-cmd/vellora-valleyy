@@ -24,12 +24,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const parsed = await parseBody(req, schema);
   if ("response" in parsed) return parsed.response;
 
-  const r = await updateOrderAsAdmin({ orderId: id, ...parsed.data, adminId: auth.admin.actorId });
+  const r = await updateOrderAsAdmin({ orderId: id, ...parsed.data, adminId: auth.admin.actorId, audit: auth.admin });
   // ids and field names only: the free-text reason and payment reference live on the OrderEvent, not here
   const base = { action: "order.update", admin: auth.admin, targetType: "order", targetId: id } as const;
   const changed = { status: parsed.data.status, paymentStatus: parsed.data.paymentStatus };
   if (r.ok) {
-    await writeAudit({ ...base, outcome: "success", details: { ...changed, changed: r.changed } });
+    // a real change was audited inside its transaction (P1-T4); a no-op is recorded here, best-effort
+    if (!r.changed) await writeAudit({ ...base, outcome: "success", details: { ...changed, changed: false } });
     return json({ ok: true });
   }
   await writeAudit({ ...base, outcome: "rejected", details: { ...changed, code: r.code } });

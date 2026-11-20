@@ -26,11 +26,10 @@ export async function POST(req: Request) {
   if ("response" in auth) return auth.response;
   const parsed = await parseBody(req, schema);
   if ("response" in parsed) return parsed.response;
-  const r = await createUser(parsed.data);
+  const r = await createUser(parsed.data, auth.admin); // success audit is written in the same transaction (P1-T4)
   if (!r.ok) {
     await writeAudit({ action: "user.create", outcome: "rejected", admin: auth.admin, details: { code: r.code } });
     return r.code === "email_in_use" ? Response.json({ error: r.message, code: r.code }, { status: 409 }) : fail(r.message, 422, { password: r.message });
   }
-  await writeAudit({ action: "user.create", outcome: "success", admin: auth.admin, targetType: "admin_user", targetId: r.user.id, details: { role: r.user.role } });
   return json({ user: r.user }, 201);
 }

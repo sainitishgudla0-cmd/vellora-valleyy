@@ -90,7 +90,7 @@ describe("queueing (transactional, idempotent)", () => {
     await confirm(o.id);
     await transitionOrder({ orderId: o.id, from: "confirmed", to: "dispatched", actor: ADMIN, reason: "shipped" });
     await transitionOrder({ orderId: o.id, from: "dispatched", to: "delivered", actor: ADMIN, reason: "done" });
-    expect((await updateOrderAsAdmin({ orderId: o.id, paymentStatus: "paid", reason: "cash received", paymentReference: "RCPT-1001" })).ok).toBe(true);
+    expect((await updateOrderAsAdmin({ orderId: o.id, paymentStatus: "paid", reason: "cash received", paymentReference: "RCPT-1001", audit: { userId: null, label: "test", role: "owner" } })).ok).toBe(true);
     expect(await templates()).toEqual(["order_placed", "order_confirmed", "order_dispatched", "order_delivered", "order_paid"]);
     const c = await placeCod(variantId);
     await transitionOrder({ orderId: c.id, from: "pending_confirmation", to: "cancelled", actor: ADMIN, reason: "asked" });

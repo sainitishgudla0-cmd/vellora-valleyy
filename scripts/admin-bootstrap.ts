@@ -56,7 +56,7 @@ async function main() {
   if (reset) {
     const user = await db.adminUser.findUnique({ where: { email } });
     if (!user || user.role !== "owner") throw new Error("No owner account with that email.");
-    const r = await resetPassword(user.id, await readPassword());
+    const r = await resetPassword(user.id, await readPassword(), who);
     if (!r.ok) throw new Error(r.message);
     await db.adminUser.update({ where: { id: user.id }, data: { active: true } });
     await writeAudit({ action: "owner.password_reset", outcome: "success", admin: who, targetType: "admin_user", targetId: user.id, details: { sessionsRevoked: r.sessionsRevoked } });
@@ -72,7 +72,7 @@ async function main() {
   if (!additional && (await db.adminUser.count({ where: { role: "owner" } })) > 0) throw new Error("An owner already exists. Create further accounts through the admin API, or use --reset to recover an owner.");
   const name = arg("name")?.trim();
   if (!name) throw new Error("--name is required");
-  const r = await createUser({ email, name, role: "owner", password: await readPassword() });
+  const r = await createUser({ email, name, role: "owner", password: await readPassword() }, who);
   if (!r.ok) throw new Error(r.message);
   await writeAudit({ action: "owner.bootstrap", outcome: "success", admin: who, targetType: "admin_user", targetId: r.user.id });
   console.log(`[admin] Owner ${email} created. Sign in with POST /api/admin/login { email, password }.`);
