@@ -308,6 +308,7 @@ async function OperationsTab({ admin }: { admin: Admin }) {
         )}
       </section>
 
+      {admin.can("fulfilment:read") && (
       <section aria-labelledby="h-dead">
         <h2 id="h-dead" className="text-[15px] font-medium">
           Notifications that could not be delivered
@@ -327,6 +328,7 @@ async function OperationsTab({ admin }: { admin: Admin }) {
           </ul>
         )}
       </section>
+      )}
 
       <section aria-labelledby="h-low">
         <h2 id="h-low" className="text-[15px] font-medium">

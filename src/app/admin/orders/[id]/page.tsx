@@ -144,6 +144,7 @@ export default async function AdminOrderPage({ params }: { params: Promise<{ id:
           {refundable.length > 0 && !admin.can("refunds:write") && <p className="mt-3 text-[12.5px] text-forest/60">Refunds are made by an owner account.</p>}
         </section>
 
+        {admin.can("fulfilment:read") && (
         <section className="rounded-[12px] border border-forest/15 bg-cream-light p-5 text-[13px]" aria-labelledby="h-shipments">
           <h2 id="h-shipments" className="text-[15px] font-medium">
             Shipments
@@ -173,7 +174,9 @@ export default async function AdminOrderPage({ params }: { params: Promise<{ id:
           {shippable && admin.can("fulfilment:write") && <ShipmentCreateForm orderId={order.id} />}
           {!shippable && <p className="mt-2 text-[12.5px] text-forest/60">Shipments can be added once the order is confirmed or paid.</p>}
         </section>
+        )}
 
+        {admin.can("fulfilment:read") && (
         <section className="rounded-[12px] border border-forest/15 bg-cream-light p-5 text-[13px]" aria-labelledby="h-invoice">
           <h2 id="h-invoice" className="text-[15px] font-medium">
             Tax invoice
@@ -194,6 +197,7 @@ export default async function AdminOrderPage({ params }: { params: Promise<{ id:
             <p className="mt-2 text-forest/60">Not issued.</p>
           )}
         </section>
+        )}
       </div>
 
       <section className="mt-8" aria-labelledby="h-history">

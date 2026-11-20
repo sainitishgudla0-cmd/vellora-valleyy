@@ -27,6 +27,7 @@
     "db:baseline:sql": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script",
     "db:restore-drill": "tsx scripts/db-guard.ts \"restore drill\" && tsx scripts/restore-drill.ts",
     "db:baseline-rehearsal": "tsx scripts/db-guard.ts \"baseline rehearsal\" && tsx scripts/baseline-rehearsal.ts",
+    "test:perf": "tsx scripts/perf-check.ts",
     "test:visual-ref": "tsx scripts/visual-against-ref.ts",
     "tax:signoff-sheet": "tsx --conditions=react-server scripts/tax-signoff-sheet.ts",
     "ops:readiness": "tsx --conditions=react-server scripts/ops-readiness.ts",

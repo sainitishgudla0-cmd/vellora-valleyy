@@ -76,4 +76,7 @@ CI and `verify:full` run on Node 24 (use `nvm use 24`); the UI script works on b
 - **Release rehearsal:** `npm run db:baseline-rehearsal` (scratch databases next to the disposable one; `RUNBOOK-DATABASE.md`).
 - **Static safety tests:** `migration-safety` (additive migrations), `vercel-config` (build never writes; crons protected), `rate-limit-policy`, `audit-critical-ratchet`, `security-config`, `smtp-config`.
 - **Browser:** `admin-operations.spec.ts` (order page, cancel-with-reason, stock tracking, operations and settings tabs). The admin login limiter (8 per 15 minutes per IP) is shared by every spec: repeated local runs within 15 minutes can trip it; clear `RateLimitBucket` rows with `admin-` keys on the disposable DB between runs.
+- **Accessibility baseline:** `accessibility.spec.ts` checks page language, a top-level heading, image alt text, labelled controls, named buttons/links and unique ids on 10 storefront/account pages and 5 admin screens (with a self-test proving the checks fail on a broken page). Colour contrast and keyboard order still need a human review.
+- **Performance and stock contention:** `npm run test:perf` against a running disposable server (`BASE_URL`, `SMOKE_ADMIN_EMAIL/PASSWORD`): sequential latency for key pages/APIs with a p95 budget, then 40 simultaneous checkouts for 5 tracked units must give exactly 5 orders and no 5xx; it cleans up after itself.
+- **Backup/restore:** `npm run db:restore-drill` (dump → restore into a scratch DB → table/row-checksum/migration/drift comparison).
 
