@@ -34,8 +34,13 @@ jobs:
         run: npm audit --audit-level=high
       - name: Env gate rejects unsafe production payment config
         run: |
-          VERCEL_ENV=production npm run -s env:check
-          if VERCEL_ENV=production PAYMENT_MODE=mock npm run -s env:check; then echo "mock accepted in production"; exit 1; fi
+          VERCEL_ENV=production CRON_SECRET=ci-cron-secret-not-secret-0123456789 npm run -s env:check
+          if VERCEL_ENV=production CRON_SECRET=ci-cron-secret-not-secret-0123456789 PAYMENT_MODE=mock npm run -s env:check; then echo "mock accepted in production"; exit 1; fi
+      - name: Env gate refuses unsafe production security configuration (M11)
+        run: |
+          if VERCEL_ENV=production npm run -s env:check; then echo "production without CRON_SECRET accepted"; exit 1; fi
+          if VERCEL_ENV=production CRON_SECRET=ci-cron-secret-not-secret-0123456789 ADMIN_LEGACY_LOGIN=on npm run -s env:check; then echo "forced legacy login accepted"; exit 1; fi
+          if VERCEL_ENV=production CRON_SECRET=ci-cron-secret-not-secret-0123456789 RATE_LIMIT_STORE=memory npm run -s env:check; then echo "per-instance rate limits accepted in production"; exit 1; fi
       - name: Env gate refuses a preview that cannot prove database isolation
         run: |
           VERCEL_ENV=preview PRODUCTION_DB_HOSTS=prod.example.test DATABASE_URL=postgresql://u:p@preview.example.test/db npm run -s env:check
