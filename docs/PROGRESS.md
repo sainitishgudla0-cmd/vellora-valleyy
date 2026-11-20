@@ -10,6 +10,7 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 ## M11 (active) — tracker: `docs/M11-RELEASE-READINESS.md`
 - Branch `backend/m11-stabilization`; `backend/development` @ `7448365` (CI 43686097499 green). P0 audit done; **P1-T1 done**. P1-T3 (F06) done in a parallel session, integrated separately (ADR 0020).
 - **2026-11-20, worktree branch `m11b/work` → pushed as `backend/m11-security-ops`** (not yet in `backend/development`; integration order is the owner's call): P1-T4 audit fail-closed, P1-T6 fail-closed rate limits, P1-T5 shared password read-only + owner recovery, next 16.4.5 (F21), P2 rehearsal/compatibility matrix (F22)/build safety, P3-T1 SMTP, P3-T3 stock import, P3-T5 crons, readiness report, P3-T6 tax sheet, P4 admin order page/operations/settings, P4-T4 docs, P5-T3 visual regression vs approved commit. `main` line: `backend/m11-main-build-fix` (DB-free build + next 16.4.5) for the owner to promote.
+- **RC report:** `docs/M11-RC-REPORT.md` (`2226326`, CI 44704595020 green, `verify:full` all gates green).
 - Blocked on others: P1-T2 (business), P4-T1 `/account` link (design approval), providers/rates/counts (business), Vercel/Neon/Razorpay steps (operator). Staff guide: `HANDOVER.md`.
 
 ## Next up

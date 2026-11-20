@@ -5,6 +5,8 @@ Central tracker for M11 (execution, evidence, blockers). `PROGRESS.md` points he
 - **Branch:** `backend/m11-stabilization` from `backend/development` @ `5225e44` (2026-11-14; origin matched, tree clean). `main` = `55aa848`, untouched.
 - **Status legend:** confirmed · partially mitigated · unverified (needs operator/external evidence) · false positive · **fixed** (with evidence).
 
+- **Release candidate (2026-11-20):** `backend/m11-security-ops` @ `2226326`, CI run 44704595020 green; report `docs/M11-RC-REPORT.md`. Integration into the shared branches waits for the owner's decision on the order with P1-T3.
+
 ## 1. Findings (audited against `5225e44`)
 | ID | Sev | Status | Finding (evidence) | Task |
 |---|---|---|---|---|
