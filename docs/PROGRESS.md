@@ -8,8 +8,9 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 - **Last verified:** 2026-11-13, `npm run verify:full` with `VERIFY_UI=1` on throwaway Postgres 16: all gates green (M10 evidence below).
 
 ## M11 (active) — tracker: `docs/M11-RELEASE-READINESS.md`
-- Branch `backend/m11-stabilization`; `backend/development` @ `7448365` (CI 43686097499 green). P0 audit done (F01-F20 labelled). **P1-T1 done** (F03: a status PATCH can no longer mark a gateway payment refunded; ADR 0019). Next: P1-T3 (failed online attempts never expire, F06); P1-T2 is blocked on a business decision.
-- Deployment re-checked 2026-11-20 (tracker §6): production domain public and healthy on `main`'s code; promotion of `e17a1ba` still blocked (no prod Vercel access, prod migrations/backup/isolation unverified, F01/F04-F06 open).
+- Branch `backend/m11-stabilization`; `backend/development` @ `7448365` (CI 43686097499 green). P0 audit done; **P1-T1 done**. P1-T3 (F06) done in a parallel session, integrated separately (ADR 0020).
+- **2026-11-20, worktree branch `m11b/work` → pushed as `backend/m11-security-ops`** (not yet in `backend/development`; integration order is the owner's call): P1-T4 audit fail-closed, P1-T6 fail-closed rate limits, P1-T5 shared password read-only + owner recovery, next 16.4.5 (F21), P2 rehearsal/compatibility matrix (F22)/build safety, P3-T1 SMTP, P3-T3 stock import, P3-T5 crons, readiness report, P3-T6 tax sheet, P4 admin order page/operations/settings, P4-T4 docs, P5-T3 visual regression vs approved commit. `main` line: `backend/m11-main-build-fix` (DB-free build + next 16.4.5) for the owner to promote.
+- Blocked on others: P1-T2 (business), P4-T1 `/account` link (design approval), providers/rates/counts (business), Vercel/Neon/Razorpay steps (operator). Staff guide: `HANDOVER.md`.
 
 ## Next up
 | Task | Status | Notes |

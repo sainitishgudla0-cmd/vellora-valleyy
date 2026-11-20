@@ -68,3 +68,12 @@ CI and `verify:full` run on Node 24 (use `nvm use 24`); the UI script works on b
 - Regression test for every fix (it must fail without the fix). Contract tests for every route.
 - Test data uses `SMOKE TEST` / `smoke.` markers and fake credentials (`rzp_test_*`, locally computed HMACs).
 - Lint: `npm run lint` (ESLint 9 flat config, part of `npm run verify` and CI). Errors fail; the frozen frontend's 12 known warnings are a ratchet (`--max-warnings`), which only goes down (ADR 0017).
+
+## M11 additions
+- **Visual regression vs the approved design** (F15): `npm run test:visual-ref` (disposable DB, migrated and seeded) builds the commit in `tests/e2e/visual-baseline.ref`, captures the 22 storefront screenshots from it, builds the current checkout and compares on the same machine. CI job `visual` runs it on Linux; no screenshots are committed. Update the ref only after the owner approves a storefront design change.
+- **Failure injection on critical paths:** temporary triggers on `AuditLog` (`audit-critical.test.ts`, `legacy-admin.test.ts`) and `RateLimitBucket` (`rate-limit-fail-closed.test.ts`, scoped to the buckets under test).
+- **SMTP:** `tests/support/fake-smtp.ts` is an in-process SMTP server on loopback (plaintext SMTP is allowed only to loopback in development/test); `smtp-delivery.test.ts` drives the real outbox dispatcher and sign-in route through it.
+- **Release rehearsal:** `npm run db:baseline-rehearsal` (scratch databases next to the disposable one; `RUNBOOK-DATABASE.md`).
+- **Static safety tests:** `migration-safety` (additive migrations), `vercel-config` (build never writes; crons protected), `rate-limit-policy`, `audit-critical-ratchet`, `security-config`, `smtp-config`.
+- **Browser:** `admin-operations.spec.ts` (order page, cancel-with-reason, stock tracking, operations and settings tabs). The admin login limiter (8 per 15 minutes per IP) is shared by every spec: repeated local runs within 15 minutes can trip it; clear `RateLimitBucket` rows with `admin-` keys on the disposable DB between runs.
+
