@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { availableUnits } from "./availability";
 import { applyStockChange, type StockActor } from "./ledger";
 
-export type AdjustCode = "not_found" | "not_tracked" | "negative_stock" | "below_reserved" | "reserved_open";
+export type AdjustCode = "not_found" | "not_tracked" | "negative_stock" | "below_reserved" | "reserved_open" | "stock_changed";
 export type AdjustResult =
   | { ok: true; trackInventory: boolean; stockQuantity: number; reserved: number; available: number | null }
   | { ok: false; code: AdjustCode; message: string };
@@ -25,6 +25,8 @@ export interface VariantInventoryUpdate {
   /** Required when `trackInventory` is given. Recorded on the ledger row that zeroes stock when tracking is switched off. */
   reason?: string;
   stockAdjust?: { delta: number; reason: string };
+  /** Compare-and-set (M11 P3-T3 stock import): refuse with `stock_changed` unless the on-hand count is still this value. */
+  expectStockQuantity?: number;
 }
 
 /**
@@ -36,6 +38,10 @@ export async function updateVariantInventory(input: VariantInventoryUpdate): Pro
     return await db.$transaction(async (tx) => {
       const current = await tx.variant.findUnique({ where: { id: input.variantId }, select: { trackInventory: true } });
       if (!current) throw new Abort(fail("not_found", "Variant not found"));
+      if (input.expectStockQuantity !== undefined) {
+        const [row] = await tx.$queryRaw<{ stockQuantity: number }[]>`SELECT "stockQuantity" FROM "Variant" WHERE "id" = ${input.variantId} FOR UPDATE`;
+        if (row?.stockQuantity !== input.expectStockQuantity) throw new Abort(fail("stock_changed", "Stock changed since the count sheet was checked; plan again"));
+      }
 
       if (input.trackInventory === true && !current.trackInventory) {
         await tx.variant.updateMany({ where: { id: input.variantId, trackInventory: false }, data: { trackInventory: true, inStock: false } }); // untracked variants hold no counts, so this starts at zero units

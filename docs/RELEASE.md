@@ -58,6 +58,32 @@ For `main` and `backend/development` (Settings → Branches → rules, or Rulese
 - [ ] Scan the production URL with securityheaders.com and Mozilla Observatory; record the grade in `PROGRESS.md`. Expected: A/A+ on headers; `script-src 'unsafe-inline'` is the known deduction (ADR 0017).
 - [ ] Browse the shop, checkout (COD), an order page and `/account` with the browser console open: no "Refused to…" CSP errors. Before M10 goes live, repeat with a Razorpay test payment (the CSP already allows Razorpay).
 
+### A7. Scheduled jobs (M11 P3-T5, F13; operator confirms the Vercel plan)
+`vercel.json` now schedules three bearer-protected jobs on the **production** deployment: order expiry `/api/internal/orders/expire` every 15 minutes (cancels unpaid/failed online orders past the payment window and releases stock; also expires quotes), payment reconciliation `/api/internal/payments/reconcile` every 15 minutes at :07/:22/:37/:52 (gateway sweep, late captures, refunds), notification outbox `/api/internal/outbox/process` every 10 minutes (does nothing while `NOTIFY_MODE` is off).
+- [ ] `CRON_SECRET` (24+ random characters) in the Production scope: `env:check` now **fails a production build without it**, because the routes answer 404 to Vercel Cron and every job would silently do nothing.
+- [ ] **Plan check:** these schedules run more than once a day. Confirm the production project's Vercel plan allows that before promoting; if the plan only allows daily jobs, the deployment is rejected, and the fallback is an external scheduler (e.g. an uptime service) calling the same three URLs with `Authorization: Bearer $CRON_SECRET` at the same frequency.
+- [ ] After the first production deploy: Vercel → Project → Cron Jobs lists the three jobs; each job's logs show `200` with counts. `npm run payments:reconcile` remains the manual fallback.
+
+### A8. Stock initialisation (M11 P3-T3, F11; quantities come from the business)
+Until a variant is tracked, availability is the manual `inStock` flag and nothing prevents overselling. To start counting:
+1. [ ] Staff count stock and fill a CSV with the header `sku,stock` (units on hand, whole numbers, one row per variant; SKUs as in the admin dashboard).
+2. [ ] Dry run (changes nothing): `npm run inventory:import -- --file counts.csv` against production needs the db-guard confirmation (`APP_ENV=production CONFIRM_PRODUCTION_DB_HOST=<host>`). It prints, per SKU, `start_tracking` / `adjust` / `unchanged` with current → new counts, refuses unknown SKUs, duplicates, non-integers and counts below what open orders hold, and lists active variants that are still untracked and not in the file.
+3. [ ] Apply in a quiet period: add `--apply --reason "Opening count YYYY-MM-DD"`. Each row is its own transaction through the stock ledger (actor `system`/`inventory-import`), compare-and-set against the count seen in the plan: a row whose stock moved meanwhile is refused (`stock_changed`), never overwritten; re-run the dry run and apply again. Re-running the same file changes nothing.
+4. [ ] Check the admin low-stock list and a product page; tracked variants with 0 units show as unavailable.
+
+## B0. First promotion of the backend onto production (one-time cutover, M11 P2-T3)
+`main`'s code cannot take orders on the migrated schema and the backend cannot run on `main`'s schema (`RUNBOOK-DATABASE.md` "Release compatibility matrix"), so this release is a short, planned ordering outage, not a rolling update.
+1. [ ] Gates in section B steps 1-3 green; A1 rehearsal done on a Neon clone of production (real data); `npm run db:baseline-rehearsal` green on a disposable DB.
+2. [ ] `main` carries the DB-free build first (branch `backend/m11-main-build-fix`, F01), so no later deploy of old code can `db push` over the migrated schema.
+3. [ ] An owner account exists in production (`admin:bootstrap`, A1/A1b): the shared-password login is off in production from this release.
+4. [ ] Production environment variables for the new code are set (A2: `CRON_SECRET`, `PRODUCTION_DB_HOSTS`, `SESSION_SECRET`, …); `ADMIN_PASSWORD` may remain until step 9.
+5. [ ] The backend cannot be pre-built against production: its build prerenders product pages from the database and fails on `main`'s schema (`Variant.trackInventory` missing; verified 2026-11-20), and a deployment's build and runtime share one set of variables, so a build against a migrated clone would also *run* against the clone. Plan the outage as "migration + one build" (the last `verify:full` build took ~3-5 minutes locally).
+6. [ ] Low-traffic window; Neon branch `pre-cutover-YYYYMMDD` (this branch is the only way back to `main`).
+7. [ ] Baseline + migrate (A1: `resolve --applied 0_init`, `db:migrate:deploy:production`, `db:schema:diff`), then **immediately** deploy the backend commit to Production (promote `main` to it). Between the migration and the new deployment going live, catalogue pages keep working but checkout and the admin order list fail.
+8. [ ] Read-only smoke (B7), an admin sign-in with the owner account, one real COD test order placed and cancelled by staff.
+9. [ ] Remove `ADMIN_PASSWORD` from Production. Record SHAs, the backup branch and the outage window in `PROGRESS.md`.
+- **Rollback during the window:** if the build in step 7 fails, production is `main` on a migrated DB (orders broken): either finish the promotion or restore the step-6 branch (repoint `DATABASE_URL`) and keep `main`. After promotion, rolling back to `main` also requires restoring the step-6 branch and loses orders taken since; prefer fixing forward.
+
 ## B. Release checklist (every release to production)
 Agent prepares, operator promotes. `main` is promoted only by the operator.
 1. [ ] `backend/development` is green in CI at the SHA being released; `npm run verify` and (milestone releases) `verify:full` with `VERIFY_UI=1` pass locally; quote the summary lines.
@@ -73,7 +99,7 @@ Agent prepares, operator promotes. `main` is promoted only by the operator.
 ## C. Rollback plan
 Decide fast: if customers are affected and the cause is not understood within 15 minutes, roll back the application first.
 1. **Application:** Vercel → Deployments → the previous good deployment → *Promote to Production* (instant, no rebuild). Or revert on `main` and let it rebuild.
-2. **Database:** migrations are additive, so the previous application version works with the new schema (this is why migrations ship first and are never destructive in the same release). Do **not** roll the schema back to "fix" an app problem.
+2. **Database:** within the backend line, migrations are additive (enforced by `tests/unit/migration-safety.test.ts`), so the previous **backend** deployment works with the new schema (this is why migrations ship first and are never destructive in the same release). Do **not** roll the schema back to "fix" an app problem. **Exception: the first cutover from `main` (B0)** — `main`'s code cannot run on the migrated schema; going back to it means restoring the pre-cutover database.
 3. **Data damage** (bad write, wrong update): restore from the Neon branch taken in step B4 into a *new* branch, compare, then copy the affected rows back; never restore over production without a written plan. For a catastrophic loss use Neon point-in-time restore to a new branch, validate with the drill checklist (`db:restore-drill` lists what to compare), then repoint `DATABASE_URL`.
 4. **Payments:** if payment behaviour is suspect, set `PAYMENT_MODE=request_only` (redeploy): checkout falls back to "request" orders; nothing is lost and no gateway call is made. Since M10, removing `RAZORPAY_LIVE_ENABLED` (or setting `PAYMENT_MODE=request_only`) is the rollback; see section E4 for what happens to payments already in flight.
 5. **Notifications / sign-in:** unset `NOTIFY_MODE` / `CUSTOMER_OTP_MODE`.
