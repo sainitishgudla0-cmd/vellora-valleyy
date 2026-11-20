@@ -7,7 +7,7 @@ import { nav, site } from "@/config/site";
 import { categories } from "@/data/categories";
 import { useUI } from "@/store/ui";
 import { cn } from "@/lib/format";
-import { IconChevron, IconMail, IconPhone } from "@/components/ui/Icons";
+import { IconChevron, IconMail, IconPhone, IconUser } from "@/components/ui/Icons";
 import { getLenis } from "@/components/motion/SmoothScroll";
 import type { MenuProduct } from "./types";
 
@@ -118,6 +118,9 @@ export function MobileMenu({ products }: { products: MenuProduct[] }) {
           >
             <Link href="/business" onClick={() => setMenu(false)} className="btn">
               Business enquiry
+            </Link>
+            <Link href="/account" onClick={() => setMenu(false)} className="flex items-center gap-2">
+              <IconUser width={16} /> My account
             </Link>
             <a href={`tel:${site.phones[0].replace(/\s/g, "")}`} className="flex items-center gap-2">
               <IconPhone width={16} /> {site.phones[0]}

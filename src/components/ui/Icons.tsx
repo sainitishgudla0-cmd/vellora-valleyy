@@ -20,6 +20,12 @@ export const IconBag = (p: P) => (
     <path d="M9 10V6.5a3 3 0 0 1 6 0V10" />
   </svg>
 );
+export const IconUser = (p: P) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="8.5" r="3.5" />
+    <path d="M5 20a7 7 0 0 1 14 0" />
+  </svg>
+);
 export const IconArrowRight = (p: P) => (
   <svg {...base(p)}>
     <path d="M4 12h15M13 6l6 6-6 6" />

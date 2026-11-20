@@ -1,7 +1,7 @@
 /** Signed-in shopper journey (M5 + M7 integration, M8-T2): sign-in with an emailed code, addresses, claiming a guest order, order detail with invoice, privacy, deletion. */
 import { expect, test, type Page } from "@playwright/test";
 import { must, adminApi, closeDb, db, ensureIllustrativeTaxRates, hasOwner, otpCode, signInThroughUi, stamp } from "./support/env";
-import { browserFetch, DESKTOP, newContext, watchErrors } from "./support/page";
+import { browserFetch, DESKTOP, MOBILE, newContext, watchErrors } from "./support/page";
 
 test.describe.configure({ mode: "serial" });
 test.skip(!hasOwner(), "needs the owner account created by verify:full (UI_TEST_ADMIN_*)");
@@ -19,6 +19,21 @@ test.beforeAll(async ({ browser }) => {
 test.afterAll(async () => {
   await page.context().close();
   await closeDb();
+});
+
+test("the storefront links to the account page (header on desktop, menu on mobile; P4-T1, F18)", async ({ browser }) => {
+  await page.goto("/");
+  await page.getByRole("link", { name: "Your account" }).click();
+  await expect(page).toHaveURL(/\/account$/);
+  await expect(page.getByRole("link", { name: "Your account" })).toHaveAttribute("aria-current", "page");
+  const ctx = await newContext(browser, MOBILE);
+  const mobile = await ctx.newPage();
+  await mobile.goto("/");
+  await mobile.getByRole("button", { name: "Menu" }).click();
+  await mobile.getByRole("link", { name: "My account" }).click();
+  await expect(mobile).toHaveURL(/\/account$/);
+  await expect(mobile.getByRole("heading", { name: "Your account" })).toBeVisible();
+  await ctx.close();
 });
 
 test("sign-in: a wrong code is refused, a new address must accept the terms, then the dashboard opens", async () => {

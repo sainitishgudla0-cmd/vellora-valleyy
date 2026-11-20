@@ -10,7 +10,7 @@ import type { CategorySlug } from "@/data/types";
 import { cartCount, useCart, useCartHydrated } from "@/store/cart";
 import { useUI } from "@/store/ui";
 import { cn, formatPrice } from "@/lib/format";
-import { IconArrowRight, IconBag, IconChevron } from "@/components/ui/Icons";
+import { IconArrowRight, IconBag, IconChevron, IconUser } from "@/components/ui/Icons";
 import { Roll } from "@/components/ui/Button";
 import { MobileMenu } from "./MobileMenu";
 import type { MenuProduct } from "./types";
@@ -136,6 +136,15 @@ export function Header({ menuProducts }: { menuProducts: MenuProduct[] }) {
                 })}
               </ul>
             </nav>
+            <Link
+              href="/account"
+              onMouseEnter={() => enter(null)}
+              aria-current={pathname.startsWith("/account") ? "page" : undefined}
+              className={cn("group flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-sage", pathname.startsWith("/account") && "bg-sage/70")}
+              aria-label="Your account"
+            >
+              <IconUser className="transition-transform duration-500 ease-out-expo group-hover:scale-110" />
+            </Link>
             <button
               onClick={openCart}
               onMouseEnter={() => enter(null)}
