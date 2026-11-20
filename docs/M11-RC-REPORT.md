@@ -1,6 +1,6 @@
 # M11 release-candidate report — 2026-11-20
 
-**Candidate:** `backend/m11-security-ops` @ `2226326` (worktree branch `m11b/work`, 14 commits on `backend/m11-stabilization` @ `eb6be73`).
+**Candidate:** `backend/m11-security-ops` @ `33d0b62` (worktree branch `m11b/work`, 16 commits on `backend/m11-stabilization` @ `eb6be73`; full local gate at `2226326`, wholesale admin tab added in `33d0b62`).
 **Not yet integrated:** `backend/m11-stabilization` and `backend/development` are unchanged (`eb6be73` / `e17a1ba`). P1-T3 (F06, failed-payment expiry) was built in a parallel session and is still uncommitted there; which lands first is the owner's decision (see "Integration" below).
 **Production readiness:** not established. CI and the local gates are green, but the operator/business items in "Remaining blockers" must be done before real customers use this code.
 
@@ -21,10 +21,11 @@
 | `138ebd7` | Docs: architecture (N01), staff handover, tracker |
 | `a582bdb` | P1-T2 offline payment records: `payments:record`, attestation, immutable record (F04, ADR 0024; migration `20261120083137_offline_payment_record`) |
 | `2226326` | P5 accessibility baseline, performance/contention check, admin view permissions |
+| `33d0b62` | P4 wholesale admin tab (accounts, quote requests); CI run 44731600980 green |
 | `main` line: `ab07872`, `4d2a80a` on `backend/m11-main-build-fix` | DB-free `vercel-build` (F01) + next 16.4.5, for the owner to promote |
 
 ## Evidence
-- **CI** (GitHub Actions, `backend/m11-security-ops`): run 44704595020 @ `2226326` — checks, `visual` (Linux, 22 screenshots vs approved commit), and migrate/integration/build/smoke + browser: all success. Earlier runs 44698567907 @ `2402043`, 44701883163 @ `138ebd7` green; 44698293036 @ `e010159` failed (env-gate case needed `CRON_SECRET`), fixed in `2402043`. https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/44704595020
+- **CI** (GitHub Actions, `backend/m11-security-ops`): run 44731600980 @ `33d0b62` all three jobs green (https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/44731600980); run 44704595020 @ `2226326` — checks, `visual` (Linux, 22 screenshots vs approved commit), and migrate/integration/build/smoke + browser: all success. Earlier runs 44698567907 @ `2402043`, 44701883163 @ `138ebd7` green; 44698293036 @ `e010159` failed (env-gate case needed `CRON_SECRET`), fixed in `2402043`. https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/44704595020
 - **`verify:full` + `VERIFY_UI=1`**, fresh disposable Postgres 16.13, Node 24.22.3, @ `2226326`: typecheck ok · unit 660/660 · env ok · migrate deploy (15 incl. `0_init`) · schema drift none · seed · integration 620/620 · build · smoke 70/0 · Playwright 58/58 (22 visual identical to the macOS baselines, accessibility 3/3, admin operations 5/5). An earlier run under host load had 2 browser timeouts (90 s) that passed on rerun; recorded in the tracker.
 - **Rehearsals:** `db:baseline-rehearsal` 21/21 with 14 migrations; `db:restore-drill` passed (36 tables, checksums equal, 15 migrations, no drift); `test:visual-ref` 22 captured / 22 identical; `test:perf` no oversell (40 concurrent checkouts for 5 units → 5 placed, 35 × 409, 0 errors); `main`-fix branch builds against a read-only DB role.
 - **Regression tests failed on the pre-fix code:** P1-T4 7/9, P1-T6 3/4, P1-T2 5/8, F06 (peer) 13/14.
