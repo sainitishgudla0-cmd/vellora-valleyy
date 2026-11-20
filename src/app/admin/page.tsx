@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { db } from "@/lib/db";
 import { adminConfigured } from "@/lib/admin-auth";
 import { currentAdmin, legacyLoginEnabled } from "@/lib/auth/admin";
@@ -10,11 +11,15 @@ import { BUSINESS_INTERESTS } from "@/lib/validation";
 import { AdminLogin, AdminLogout, EnquiryStatus, OrderStatusSelect, RemoveTestData, VariantEditor } from "@/components/admin/AdminControls";
 import { ChangePasswordForm, SessionsTable, TeamManager } from "@/components/admin/AccountControls";
 import { TEST_ENQUIRY_WHERE, TEST_ORDER_WHERE, TEST_SUBSCRIBER_WHERE } from "@/lib/test-data";
+import { collectReadiness, listPaymentExceptions } from "@/lib/ops/readiness";
+import { listLowStock } from "@/lib/inventory/adjust";
+import { OutboxRetryButton, StockEditor } from "@/components/admin/OrderOps";
+import { ShippingRuleActions, ShippingRuleForm, TaxRateForm } from "@/components/admin/SettingsControls";
 
 export const metadata: Metadata = { title: "Admin", robots: { index: false, follow: false } };
 export const dynamic = "force-dynamic";
 
-const BASE_TABS = ["orders", "enquiries", "products", "account"] as const;
+const BASE_TABS = ["orders", "enquiries", "products", "operations"] as const;
 
 export default async function AdminPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const sp = await searchParams;
@@ -28,7 +33,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   const admin = await currentAdmin();
   if (!admin) return <AdminLogin emailRequired={!legacyLoginEnabled()} />;
 
-  const tabs: readonly string[] = admin.can("users:manage") ? [...BASE_TABS, "team"] : BASE_TABS;
+  const tabs: readonly string[] = [...BASE_TABS, ...(admin.can("fulfilment:read") ? ["settings"] : []), "account", ...(admin.can("users:manage") ? ["team"] : [])];
   const tab = tabs.includes(sp.tab ?? "") ? sp.tab! : "orders";
   const [orders, enquiries, products, subs, newOrders, newEnq, testOrders, testEnq, testSubs] = await Promise.all([
     tab === "orders" ? db.order.findMany({ orderBy: { createdAt: "desc" }, include: { items: true }, take: 100 }) : Promise.resolve([]),
@@ -100,7 +105,9 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
                 {orders.map((o) => (
                   <tr key={o.id} className="align-top">
                     <td className="py-3 pr-3">
-                      <span className="font-medium">{o.number}</span>
+                      <Link href={`/admin/orders/${o.id}`} className="font-medium underline">
+                        {o.number}
+                      </Link>
                       <br />
                       <span className="text-forest/60">{o.createdAt.toLocaleString("en-IN")}</span>
                     </td>
@@ -199,7 +206,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
                   <th className="py-2 pr-3">Pack</th>
                   <th className="py-2 pr-3">Barcode</th>
                   <th className="py-2 pr-3">MRP</th>
-                  <th className="py-2">Selling price · stock</th>
+                  <th className="py-2 pr-3">Selling price · stock</th>
+                  <th className="py-2">Units (stock tracking)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-forest/10">
@@ -210,8 +218,15 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
                       <td className="py-2.5 pr-3">{v.label}</td>
                       <td className="py-2.5 pr-3 text-forest/60">{v.sku}</td>
                       <td className="py-2.5 pr-3">{formatPrice(v.mrp)}</td>
-                      <td className="py-2.5">
+                      <td className="py-2.5 pr-3">
                         <VariantEditor id={v.id} price={v.price / 100} inStock={v.inStock} />
+                      </td>
+                      <td className="py-2.5">
+                        {admin.can("inventory:write") ? (
+                          <StockEditor id={v.id} tracked={v.trackInventory} stock={v.stockQuantity} reserved={v.reserved} />
+                        ) : (
+                          <span className="text-[12.5px] text-forest/60">{v.trackInventory ? `${v.stockQuantity - v.reserved} available` : "not tracked"}</span>
+                        )}
                       </td>
                     </tr>
                   )),
@@ -222,8 +237,186 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         </div>
       )}
 
+      {tab === "operations" && <OperationsTab admin={admin} />}
+      {tab === "settings" && admin.can("fulfilment:read") && <SettingsTab admin={admin} />}
       {tab === "account" && <AccountTab admin={admin} />}
       {tab === "team" && admin.can("users:manage") && <TeamTab currentUserId={admin.userId} />}
+    </div>
+  );
+}
+
+type Admin = NonNullable<Awaited<ReturnType<typeof currentAdmin>>>;
+const STATUS_MARK = { ok: "✓", action: "•", blocker: "✗" } as const;
+const STATUS_STYLE = { ok: "text-leaf", action: "text-forest", blocker: "font-medium text-[#9b2c2c]" } as const;
+
+/** M11: launch readiness, money that needs a person, undeliverable notifications and low stock. Read-only except retries. */
+async function OperationsTab({ admin }: { admin: Admin }) {
+  const [report, exceptions, dead, low] = await Promise.all([collectReadiness(), listPaymentExceptions(), db.outboxMessage.findMany({ where: { status: "dead" }, orderBy: { createdAt: "desc" }, take: 50 }), listLowStock()]);
+  return (
+    <div className="mt-6 space-y-10 text-[13px]">
+      <section aria-labelledby="h-readiness">
+        <h2 id="h-readiness" className="text-[15px] font-medium">
+          Readiness <span className={`ml-2 text-[12px] uppercase tracking-wider ${STATUS_STYLE[report.overall]}`}>{report.overall}</span>
+        </h2>
+        <ul className="mt-3 space-y-2" data-testid="readiness-list">
+          {report.checks.map((c) => (
+            <li key={c.id} data-status={c.status}>
+              <span className={STATUS_STYLE[c.status]} aria-label={c.status}>
+                {STATUS_MARK[c.status]}
+              </span>{" "}
+              <span className="text-forest/60">[{c.area}]</span> {c.summary}
+              {c.next && <span className="block pl-5 text-[12px] text-forest/60">Next: {c.next}</span>}
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section aria-labelledby="h-exceptions">
+        <h2 id="h-exceptions" className="text-[15px] font-medium">
+          Payments needing a person
+        </h2>
+        {exceptions.length === 0 ? (
+          <p className="mt-2 text-forest/60">Nothing to act on.</p>
+        ) : (
+          <table className="mt-3 w-full min-w-[640px] text-left text-[12.5px]" data-testid="exceptions-table">
+            <thead className="text-[11px] uppercase tracking-wider text-forest/60">
+              <tr>
+                <th className="py-2 pr-3">Order</th>
+                <th className="py-2 pr-3">What</th>
+                <th className="py-2 pr-3">Amount</th>
+                <th className="py-2">Since</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-forest/10">
+              {exceptions.map((e) => (
+                <tr key={`${e.kind}-${e.paymentId}-${e.refundId}`}>
+                  <td className="py-2 pr-3">
+                    <Link href={`/admin/orders/${e.orderId}`} className="underline">
+                      {e.orderNumber}
+                    </Link>
+                  </td>
+                  <td className="py-2 pr-3">
+                    {e.kind === "orphan_capture" ? "Customer charged, payment not applied: refund it" : e.kind === "flagged_attempt" ? "Awaiting reconciliation with the gateway" : e.kind === "pending_refund" ? "Refund pending over an hour" : "Refund failed"}
+                    {e.reason && <span className="text-forest/60"> · {e.reason.replace(/_/g, " ")}</span>}
+                  </td>
+                  <td className="py-2 pr-3">{formatPrice(e.amountPaise)}</td>
+                  <td className="py-2">{new Date(e.since).toLocaleString("en-IN")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section aria-labelledby="h-dead">
+        <h2 id="h-dead" className="text-[15px] font-medium">
+          Notifications that could not be delivered
+        </h2>
+        {dead.length === 0 ? (
+          <p className="mt-2 text-forest/60">None.</p>
+        ) : (
+          <ul className="mt-2 space-y-1.5">
+            {dead.map((m) => (
+              <li key={m.id} className="flex flex-wrap items-center gap-3">
+                <span>
+                  {m.template.replace(/_/g, " ")} · {m.subjectType} · {m.lastError ?? "failed"} · {m.createdAt.toLocaleString("en-IN")}
+                </span>
+                {admin.can("fulfilment:write") && <OutboxRetryButton id={m.id} />}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section aria-labelledby="h-low">
+        <h2 id="h-low" className="text-[15px] font-medium">
+          Low stock
+        </h2>
+        {low.length === 0 ? (
+          <p className="mt-2 text-forest/60">No tracked variant is running low.</p>
+        ) : (
+          <ul className="mt-2 space-y-1">
+            {low.map((v) => (
+              <li key={v.variantId}>
+                {v.product} ({v.label}, {v.sku}): {v.available} available ({v.stockQuantity} on hand, {v.reserved} held)
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
+
+/** Business configuration staff enter themselves: shipping rules and GST rates. */
+async function SettingsTab({ admin }: { admin: Admin }) {
+  const [rules, rates] = await Promise.all([db.shippingRule.findMany({ orderBy: { pincodePrefix: "asc" } }), db.taxRate.findMany({ orderBy: [{ code: "asc" }, { effectiveFrom: "desc" }], take: 500 })]);
+  const active = rules.filter((r) => r.active).length;
+  return (
+    <div className="mt-6 space-y-10 text-[13px]">
+      <section aria-labelledby="h-rules">
+        <h2 id="h-rules" className="text-[15px] font-medium">
+          Shipping rules
+        </h2>
+        <p className="mt-1 text-[12.5px] text-forest/65">
+          {active === 0
+            ? "No active rule: every pincode is accepted and delivery charges are confirmed by staff. As soon as one rule is active, only pincodes matching an active rule are served (longest prefix wins; an empty prefix matches everything)."
+            : `${active} active rule(s): only matching pincodes are served (longest prefix wins).`}
+        </p>
+        {rules.length > 0 && (
+          <table className="mt-3 w-full min-w-[640px] text-left text-[12.5px]">
+            <thead className="text-[11px] uppercase tracking-wider text-forest/60">
+              <tr>
+                <th className="py-2 pr-3">Name</th>
+                <th className="py-2 pr-3">Prefix</th>
+                <th className="py-2 pr-3">Delivery</th>
+                <th className="py-2 pr-3">Status</th>
+                <th className="py-2" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-forest/10">
+              {rules.map((r) => (
+                <tr key={r.id}>
+                  <td className="py-2 pr-3">{r.name}</td>
+                  <td className="py-2 pr-3">{r.pincodePrefix || "all"}</td>
+                  <td className="py-2 pr-3">{r.serviceable ? `${formatPrice(r.fee)}${r.freeAboveSubtotal ? `, free above ${formatPrice(r.freeAboveSubtotal)}` : ""}` : "not delivered"}</td>
+                  <td className="py-2 pr-3">{r.active ? "active" : "inactive"}</td>
+                  <td className="py-2">{admin.can("fulfilment:write") && <ShippingRuleActions id={r.id} active={r.active} />}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {admin.can("fulfilment:write") && (
+          <div className="mt-4">
+            <ShippingRuleForm />
+          </div>
+        )}
+      </section>
+
+      <section aria-labelledby="h-rates">
+        <h2 id="h-rates" className="text-[15px] font-medium">
+          GST rates
+        </h2>
+        <p className="mt-1 text-[12.5px] text-forest/65">Append-only, per HSN code and start date. Enter only rates the accountant has approved; invoices are refused for any item without one.</p>
+        {rates.length === 0 ? (
+          <p className="mt-2 text-forest/60">No rates recorded.</p>
+        ) : (
+          <ul className="mt-2 space-y-1">
+            {rates.map((r) => (
+              <li key={r.id}>
+                {r.code}: {(r.rateBp / 100).toFixed(2)}% from {r.effectiveFrom.toISOString().slice(0, 10)}
+                {r.note && <span className="text-forest/60"> · {r.note}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+        {admin.can("tax:write") && (
+          <div className="mt-4">
+            <TaxRateForm />
+          </div>
+        )}
+      </section>
     </div>
   );
 }

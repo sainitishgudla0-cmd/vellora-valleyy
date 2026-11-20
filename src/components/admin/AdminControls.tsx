@@ -1,6 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { adminApi, errorText } from "./api";
 import { ORDER_STATUSES } from "./statuses";
 
 async function patch(url: string, body: unknown) {
@@ -90,6 +91,7 @@ export function RemoveTestData({ count }: { count: number }) {
 export function OrderStatusSelect({ id, status }: { id: string; status: string }) {
   const [v, setV] = useState(status);
   const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [error, setError] = useState("");
   return (
     <div className="flex items-center gap-2">
       <select
@@ -99,11 +101,17 @@ export function OrderStatusSelect({ id, status }: { id: string; status: string }
           const next = e.target.value;
           setV(next);
           setState("saving");
-          try {
-            await patch(`/api/admin/orders/${id}`, { status: next });
-            setState("saved");
-          } catch {
+          setError("");
+          // M11 P4: some changes (e.g. cancelling a paid order) need a written reason; ask for it instead of failing silently
+          let r = await adminApi("PATCH", `/api/admin/orders/${id}`, { status: next });
+          if (r.status === 422 && r.data.fields?.reason) {
+            const reason = window.prompt(`${errorText(r)}. Why is this order moving to "${next.replace(/_/g, " ")}"?`)?.trim();
+            if (reason) r = await adminApi("PATCH", `/api/admin/orders/${id}`, { status: next, reason });
+          }
+          if (r.ok) setState("saved");
+          else {
             setState("error");
+            setError(errorText(r));
             setV(status);
           }
         }}
@@ -115,7 +123,9 @@ export function OrderStatusSelect({ id, status }: { id: string; status: string }
           </option>
         ))}
       </select>
-      <span className="text-[11px] text-forest/60">{state === "saving" ? "…" : state === "saved" ? "Saved" : state === "error" ? "Error" : ""}</span>
+      <span className="text-[11px] text-forest/60" role="status">
+        {state === "saving" ? "…" : state === "saved" ? "Saved" : state === "error" ? error || "Error" : ""}
+      </span>
     </div>
   );
 }
