@@ -1,6 +1,6 @@
-# M11 release-candidate report — 2026-11-20
+# M11 release-candidate report — 2026-11-20 (release procedure added 2026-11-21)
 
-**Release candidate:** `backend/development` @ the commit after `1aefdd8` (P4-T1 storefront `/account` link, approved by the owner; that commit moves the approved-design ref to `1aefdd8` and records this report). It contains this stack (16 commits, built on worktree branch `m11b/work`, pushed as `backend/m11-security-ops`, code final at `33d0b62`) and P1-T3 from the parallel session.
+**Release candidate:** `backend/development` @ `9318de2` (`9318de2f38bb…`; P4-T1 storefront `/account` link approved by the owner, approved-design ref `1aefdd8`). CI on that exact SHA: run 44803819279 on `backend/development` (https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/44803819279), push event, 2026-11-20 19:37–19:45 UTC, all three jobs green: checks (unit 660/660, `npm audit` 0, env gate); migrate + integration 634/634 + build + smoke 70/0 + browser 38 passed / 22 visual skipped (Linux has no stored baselines); visual job 22/22 identical to `1aefdd8`. Same SHA on `backend/m11-stabilization`: run 44802352017 green. Later commits on these branches are docs only. It contains this stack (16 commits, built on worktree branch `m11b/work`, pushed as `backend/m11-security-ops`, code final at `33d0b62`) and P1-T3 from the parallel session.
 **Integrated (2026-11-20, owner chose this stack first):** `backend/m11-stabilization` fast-forwarded `eb6be73..64d5b26` (CI run 44789949597 green, all three jobs: https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/44789949597), then `backend/development` fast-forwarded `e17a1ba..64d5b26` (CI run 44791463928 green, all three jobs: https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/44791463928). P1-T3 (F06) from the parallel session was rebased on top as `95e1323` (CI run 44791548874 green: https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/44791548874) and fast-forwarded into `backend/development` (CI run 44793165095 green, all three jobs: https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/44793165095).
 **Production readiness:** not established. CI and the local gates are green, but the operator/business items in "Remaining blockers" must be done before real customers use this code.
 
@@ -38,13 +38,51 @@
 - `npm audit`: 0 on the backend line; `main` line has build-time `postcss`/`tsx`/`esbuild` advisories (fixed on the backend line since M9).
 
 ## Integration
-Done: `backend/m11-stabilization` = `backend/development` = `b2862da` + this docs commit (CI on `b2862da`: 44794668439 milestone branch green) (fast-forward only, no merge commits, no force-push, `main` untouched at `55aa848`). `tests/e2e/visual-baseline.ref` now names `1aefdd8` (the owner-approved header with the account link).
+Done: `backend/m11-stabilization` = `backend/development` = `9318de2` (CI 44802352017 / 44803819279), plus later docs-only commits (fast-forward only, no merge commits, no force-push, `main` untouched at `55aa848`). `tests/e2e/visual-baseline.ref` now names `1aefdd8` (the owner-approved header with the account link).
+
+## Release procedure (prepared 2026-11-21; nothing executed against production)
+
+### Verified
+- RC `9318de2` and its CI (above).
+- `backend/m11-main-build-fix` `4d2a80a` = `main` `55aa848` + 2 commits (`ab07872`, `4d2a80a`) that change only `package.json` (`vercel-build`; `next` ^16.4.5) and `package-lock.json` (`next` plus `@next/*` platform packages, 16.4.2 → 16.4.5). It fast-forwards from `main`. `vercel.json`, source and schema are unchanged. `main`'s DB writes are all in request handlers; none run at build.
+- The fix branch never writes during a build (Node 24.22.3, clean `npm ci`, disposable Postgres with `main`'s schema and seed, a role with `SELECT` only and read-only transactions, statement logging). 224 statements, all `SELECT`. Full `pg_dump` identical before/after, write counters unchanged, no `db push` or seed in the build log. Details: `RELEASE.md` A0.
+- GitHub side of the deploy hook: the Vercel and Render GitHub Apps are installed on the repository and receive every push (`main` included), but have never reported a check run, commit status or deployment.
+
+### Blocked (needs someone else)
+- **Whether a push to `main` deploys production is unknown.** The production project is not visible to the agent's Vercel account, and nothing in GitHub proves a Git connection. `main` must not be promoted until the owner answers `RELEASE.md` A0 questions 1-5.
+- Everything that touches production (database, Vercel settings, environment variables, deploys) is operator work. Separate authorization is required for the A0 push and for the B0 cutover.
+
+### Operator actions, in order
+| # | Action | Where | Needs |
+|---|---|---|---|
+| 1 | Identify the production Vercel project owner; confirm Git connection, production branch, build settings, production DB variables; check for a Render service | `RELEASE.md` A0 questions 1-5 | project owner |
+| 2 | Neon branch `pre-mainfix-YYYYMMDD`, then fast-forward `main` to `4d2a80a`; check the build log and pages; rollback = Vercel Instant Rollback (never `git revert` to `55aa848`) | `RELEASE.md` A0 | owner of `main` + step 1 answers |
+| 3 | Branch protection on `main` / `backend/development`; preview isolation (Preview scope has its own Neon branch and `PRODUCTION_DB_HOSTS`, or previews disabled) | `RELEASE.md` A4, A3 | Vercel + GitHub admin |
+| 4 | Production-clone rehearsal: Neon branch + `pg_dump --format=custom` of production; read-only diff against `0_init` (must print an empty migration); on the branch, `migrate resolve --applied 0_init`, `migrate deploy` (14 migrations), `db:schema:diff` = none; deploy `9318de2` as a Preview against that branch and smoke it | `RUNBOOK-DATABASE.md` "Production baselining" 1-4; `RELEASE.md` A1 | operator, production DB credentials |
+| 5 | Environment configuration for Production and Preview (`SESSION_SECRET`, `CRON_SECRET` ≥ 24 chars, `PRODUCTION_DB_HOSTS`, `PAYMENT_MODE=request_only`, notify/OTP unset until a provider exists, no `RATE_LIMIT_STORE`); confirm the plan allows the sub-daily crons | `RELEASE.md` A2, A7 | operator |
+| 6 | Razorpay test-mode acceptance in a Preview with an isolated database (`razorpay_test`, test keys, test webhook secret): happy path, dropped browser, failed payment, duplicate webhook, refunds | `RELEASE.md` E1 | operator, Razorpay test account |
+| 7 | GST: `npm run tax:signoff-sheet` against the rehearsal branch → accountant fills rates, effective dates and sign-off | `RELEASE.md` A9 steps 1-2 | accountant |
+| 8 | Stock: staff count sheet (`sku,stock`); dry run of `inventory:import` against the rehearsal branch | `RELEASE.md` A8 steps 1-2 | business |
+| 9 | Cutover in a low-traffic window: Neon branch `pre-cutover-YYYYMMDD`; baseline + `db:migrate:deploy:production` + `db:schema:diff`; `admin:bootstrap` first owner; **immediately** promote `9318de2` to `main` (separate authorization); smoke, owner sign-in, one COD test order placed and cancelled; remove `ADMIN_PASSWORD` | `RELEASE.md` B0, B; `RUNBOOK-DATABASE.md` step 5 | owner + operator |
+| 10 | After cutover: approved GST rates in Admin → Settings and `SELLER_GSTIN`; `inventory:import --apply`; shipping rules; email provider → `NOTIFY_MODE=smtp`, `CUSTOMER_OTP_MODE=email`; `ops:readiness` with every item ✓ | `RELEASE.md` A9 step 3, A8 steps 3-4; ADR 0023 | owner, business |
+| 11 | Live payments only after E2 decisions; separate authorization | `RELEASE.md` E2-E4 | owner |
+
+### Operator evidence still missing (none of it can be inferred from the repository)
+- The production Vercel project's owning account/team, its Git connection and production branch, build settings and plan (crons).
+- Whether a Render service deploys from this repository, and its build command.
+- Branch protection settings on `main` and `backend/development` (F17).
+- Production database host, Neon project, point-in-time-restore window, and a restore performed on Neon (only the local drill exists).
+- The production schema diff against `0_init` (never run, F02).
+- Which variables are set in Production and Preview today, and whether Preview uses a separate database (F16).
+- Razorpay test keys and test webhook secret, and the E1 run (F20).
+- Business inputs: email provider and verified sender domain, stock counts, shipping rules, accountant-approved GST rates and `SELLER_GSTIN`, offline-payment policy (ADR 0024).
+- Monitoring and alert routing (A5), RPO/RTO (section D).
 
 ## Remaining blockers (exact resolution)
 | Blocker | Owner | Resolution |
 |---|---|---|
 | Production Vercel project access | owner | Grant the deploying account access to the `velora-valley` project (tracker §6) |
-| `main` deploys run `db push` (F01) | owner | Promote `backend/m11-main-build-fix` to `main` **before** anything else deploys |
+| `main` deploys run `db push` (F01) | owner | `RELEASE.md` A0: answer its five questions (project owner, Git connection, build settings, production DB, Render), then fast-forward `main` to `4d2a80a` **before** anything else deploys |
 | Production baselining + migrations, Neon-clone rehearsal | operator | `RUNBOOK-DATABASE.md` steps 1-6; `RELEASE.md` A1, B0 (planned ordering outage; no compatible overlap with `main`, F22) |
 | First owner account | operator | `npm run admin:bootstrap` against production (A1) before promotion |
 | `CRON_SECRET`, `PRODUCTION_DB_HOSTS`, plan allows sub-daily crons | operator | `RELEASE.md` A2, A7 |

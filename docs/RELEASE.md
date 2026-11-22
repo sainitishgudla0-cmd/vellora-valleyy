@@ -4,6 +4,33 @@ Written for the operator (you) and for agents. Rows marked **operator** change p
 
 ## A. One-time setup (operator, before M10 goes live)
 
+### A0. Promote the DB-free build to `main` first (F01; owner of `main` and of the production Vercel project)
+**Why first:** today every production build of `main` (`55aa848`) runs `prisma generate && prisma db push --skip-generate && tsx prisma/seed.ts && next build`. A rebuild therefore rewrites the production schema to `main`'s and re-upserts the catalogue. After the backend migrations exist in production, a rebuild of that old `main` would try to push them away. `backend/m11-main-build-fix` (`4d2a80a`) is `main` plus two commits that change only `package.json` and `package-lock.json`: `vercel-build` becomes `prisma generate && next build`, and `next` goes from 16.4.2 to 16.4.5 (lockfile: `next` and the `@next/*` platform packages only). No source, schema or `vercel.json` change.
+
+**Verified by the agent (2026-11-21, disposable database only):** a clean `npm ci` of `4d2a80a` on Node 24.22.3, then `npm run vercel-build` against a local Postgres with `main`'s schema (the `0_init` migration) and `main`'s seed. It connected as a role with only `SELECT`, with `default_transaction_read_only=on` and statement logging. The role refuses `CREATE TABLE`, `INSERT` and `UPDATE`. Result: build exit 0, 46 static pages. The Postgres log shows 224 statements, all `SELECT` on `Product`/`Variant`. The full `pg_dump` (schema and data) is identical before and after, with insert/update/delete counters unchanged. The build log has no `db push` and no seed output. The old command is not re-run here (it would `db push`); the `package.json` diff is the evidence.
+
+**Unknown, and must be answered by the project owner before the push (do not promote while any is unknown):**
+1. Which Vercel account or team owns the production project behind `https://velora-valley.vercel.app`? (The agent's Vercel login cannot see it; §6 of the M11 tracker.)
+2. Project → Settings → Git: is it connected to `sainitishgudla0-cmd/vellora-valleyy`, with production branch `main`? GitHub evidence: the Vercel and Render GitHub Apps are installed on this repository (each push since 2026-11-07, `main` included, gets a queued check suite from both apps). But neither has ever reported a check, a commit status or a GitHub deployment. So a push to `main` may or may not start a production build. Only the project settings can say.
+3. Settings → Build: no "Ignored Build Step" or Build Command override that differs from `vercel.json` (`npm run vercel-build`, install `npm install`).
+4. Production `DATABASE_URL`/`DATABASE_URL_UNPOOLED` point at the production Neon database. The new build only reads it.
+5. Is there a Render service built from this repository, and with what build command? (The Render app is installed; nothing reports from it.)
+
+**Promotion (owner, from a clean clone; fast-forward only; refused if `main` moved):**
+```bash
+git fetch origin
+test "$(git rev-parse origin/main)" = 55aa848180c4ba202a488c85d7d24526e2e1cc4e
+git merge-base --is-ancestor origin/main 4d2a80a31a4d02c943d1c49ca85d14aad4e7b9a6
+git push origin 4d2a80a31a4d02c943d1c49ca85d14aad4e7b9a6:refs/heads/main
+```
+Before the push: Neon branch `pre-mainfix-YYYYMMDD` from production (insurance; this build should not write). If branch protection on `main` refuses the push and requires a pull request, the owner opens one from `backend/m11-main-build-fix` (only with the user's explicit request, CLAUDE.md rule 1) and merges it without a merge commit. GitHub's "Rebase and merge" re-creates the two commits with new SHAs but the same tree; record the resulting `main` SHA and confirm `git diff 4d2a80a origin/main` is empty.
+
+**Check after the push (if Vercel builds it):** the deployment's build log shows `prisma generate && next build` and contains neither `db push` nor "Seeded". `/`, `/shop` and a product page return 200. `/api/products` returns the same product count as before. Optionally compare the production row counts with the `pre-mainfix` branch.
+
+**Consequence to accept:** deploys no longer re-seed. A catalogue edit committed to `main`'s `src/data` reaches the database only by an explicit, reviewed seed run. `main` does not change again until the backend cutover (B0), so this only matters if someone edits `main` in between.
+
+**Rollback:** Vercel → Deployments → the previous production deployment → *Promote to Production* (Instant Rollback, no rebuild, so no `db push`). **Do not `git revert` on `main`:** that would rebuild the old command and run `db push` + seed against production. If the new build fails, production keeps serving the previous deployment; fix forward on `backend/m11-main-build-fix`.
+
 ### A1. Production baselining (M9-T1)
 Follow "Production baselining" in `RUNBOOK-DATABASE.md` step by step. Agent role: prepare and review, never run against production.
 - [ ] Neon branch `pre-baseline-YYYYMMDD` and a `pg_dump --format=custom` taken; the dump restored into a scratch DB (`npm run db:restore-drill` rehearses exactly this on a disposable copy).
@@ -106,7 +133,7 @@ Agent prepares, operator promotes. `main` is promoted only by the operator.
 
 ## C. Rollback plan
 Decide fast: if customers are affected and the cause is not understood within 15 minutes, roll back the application first.
-1. **Application:** Vercel → Deployments → the previous good deployment → *Promote to Production* (instant, no rebuild). Or revert on `main` and let it rebuild.
+1. **Application:** Vercel → Deployments → the previous good deployment → *Promote to Production* (instant, no rebuild). Or revert on `main` and let it rebuild, **but only once `main` carries the DB-free build (A0)**: reverting to or past `55aa848` rebuilds with `db push` + seed (F01).
 2. **Database:** within the backend line, migrations are additive (enforced by `tests/unit/migration-safety.test.ts`), so the previous **backend** deployment works with the new schema (this is why migrations ship first and are never destructive in the same release). Do **not** roll the schema back to "fix" an app problem. **Exception: the first cutover from `main` (B0)** — `main`'s code cannot run on the migrated schema; going back to it means restoring the pre-cutover database.
 3. **Data damage** (bad write, wrong update): restore from the Neon branch taken in step B4 into a *new* branch, compare, then copy the affected rows back; never restore over production without a written plan. For a catastrophic loss use Neon point-in-time restore to a new branch, validate with the drill checklist (`db:restore-drill` lists what to compare), then repoint `DATABASE_URL`.
 4. **Payments:** if payment behaviour is suspect, set `PAYMENT_MODE=request_only` (redeploy): checkout falls back to "request" orders; nothing is lost and no gateway call is made. Since M10, removing `RAZORPAY_LIVE_ENABLED` (or setting `PAYMENT_MODE=request_only`) is the rollback; see section E4 for what happens to payments already in flight.
