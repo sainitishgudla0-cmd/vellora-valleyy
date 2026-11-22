@@ -103,7 +103,66 @@ security headers; `npm audit` 0.
   `updateVariantInventory({ alsoInTransaction })`; regression test added.
 - 
 ## Progress
-_(updated as work proceeds)_
+| Step | Status | Evidence |
+|---|---|---|
+| Audit VA-01..VA-08 + independent review | done | this report |
+| Fixes + regression tests | done | commit `8ed5b3f` on `backend/m12-audit-fixes` |
+| Local gates | done | see "Tests and evidence" |
+| CI on `backend/m12-audit-fixes` @ `8ed5b3f` | **green** | run 45073494195 (https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/45073494195): checks; migrate + integration + build + smoke 70/0 + browser 38 passed / 22 visual skipped; `visual` job 22/22 identical to approved `1aefdd8` |
+| Integration into `backend/development` | **done** | fast-forward `0ec05ea..8ed5b3f` (no concurrent commits, no merge commit, no force push); CI run 45074396960 green, all three jobs (https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/45074396960) |
+| `main` promotion | **not done — unsafe** | "Launch blockers" 2 |
+| Vercel staging / production | **blocked** | "Launch blockers" 1 |
 
-## Deployment (Phases 5–7) — status and blockers
-See the "Launch blockers" section (filled in once CI and the Vercel checks are done).
+## Launch blockers (exact; each needs the owner)
+1. **Vercel plan.** The connected account (`devarchith5-1566`, scope `devarchith-s-projects`) is on **Hobby**
+   (checked 2026-11-22: `billing.plan = "hobby"`, no teams). Vercel's Terms §4: *"You shall only use the Services under
+   a Hobby plan for your personal or non-commercial use"* — an online store for Anantha Food Products is commercial.
+   Independently, Hobby cron jobs may run at most once a day and a more frequent expression **fails the deployment**
+   ("Hobby accounts are limited to daily cron jobs"); `vercel.json` needs `*/15` (payment-window expiry, releases held
+   stock), `7,22,37,52` (payment reconciliation) and `*/10` (email outbox). Making these daily would leave stock held
+   for up to a day and payments unreconciled for hours, so they were not weakened. **Resolution:** the owner upgrades
+   the account (or creates a Pro team) in the Vercel dashboard (Settings → Billing; Pro is a paid plan; a 14-day Pro
+   trial is offered on this account). Starting a trial or paying is the owner's decision and was not done by the agent.
+   The Vercel MCP connection also needs team access (`authorize_team_access`); the Vercel CLI is already signed in to
+   this account.
+2. **`main` promotion is unsafe.** The Vercel and Render GitHub apps receive every push to this repository, the
+   original production project (`velora-valley.vercel.app`, owned by Nitish) is not visible from this account, and its
+   Git connection and production branch are unknown (M11 `RELEASE.md` A0 questions 1-5 are still unanswered). Pushing
+   this code to `main` could build that project against its production database, which has none of the backend
+   migrations (M11 F22: no compatible overlap), i.e. a broken live site. `main` stays at `55aa848`. Not needed for a NEW
+   project: it can deploy `backend/development` (or a release branch) as its production branch, or via the CLI.
+   The account's existing project `velora-valley-v3` is linked to a different repository (`devarchith/velora-valley-v3`)
+   and has no environment variables; it was left untouched.
+3. **Database.** A new Neon Postgres (Vercel Marketplace) per environment: staging and production on separate
+   projects or branches; production on a plan with point-in-time restore. Creating it accepts the provider's terms and
+   picks a (possibly paid) plan; it waits on blocker 1 (the database is attached to the new Vercel project).
+4. **Business inputs that must not be invented** (unchanged from M11): email provider + verified sender domain
+   (`SMTP_URL`, `EMAIL_FROM`; without them customer sign-in and order emails stay off), accountant-approved GST rates
+   per HSN and `SELLER_GSTIN`, opening stock counts, shipping rules (serviceable pincodes, fees), offline-payment policy
+   (ADR 0024), the owner's admin email (the owner chooses the password at `admin:bootstrap`), Razorpay **test** keys and
+   test webhook secret for the staging payment run.
+
+## Owner runbook once blocker 1 is resolved (agent-executable after the owner's go-ahead)
+1. Vercel: new project `velora-valley-store` (framework Next.js, region `sin1`, Node 24, build `npm run vercel-build`,
+   which never writes to the database), production branch = `backend/development` (not `main`), Preview deployments
+   protected (Vercel Authentication).
+2. Marketplace → Neon: database `velora-staging` connected to Preview, `velora-production` connected to Production.
+   Set `PRODUCTION_DB_HOSTS` (production host) in both scopes so a preview on the production host fails its build.
+3. Env (per scope): `SESSION_SECRET` (48+ random chars), `CRON_SECRET` (32+), `PAYMENT_MODE=request_only` (Production)
+   / `razorpay_test` (Preview, test keys only), `ADMIN_LEGACY_LOGIN=off`, no `ADMIN_PASSWORD`, `NOTIFY_MODE` and
+   `CUSTOMER_OTP_MODE` unset until the email provider exists. Never `RAZORPAY_LIVE_ENABLED`.
+4. Migrations from a trusted machine: `npm run db:migrate:deploy` (staging) and `db:migrate:deploy:production` with
+   `APP_ENV=production CONFIRM_PRODUCTION_DB_HOST=<host>`; `db:schema:diff` = no difference; seed the catalogue once with
+   `npm run db:seed` (explicit, reviewed; never in a build); `npm run admin:bootstrap` for the first owner.
+5. Staging acceptance: smoke (`npm run test:api` with `TEST_ALLOWED_HOSTS` = the preview host), browser journeys,
+   Razorpay test-mode run (`RELEASE.md` E1), `npm run db:restore-drill` against a Neon branch.
+6. Production: deploy, verify `/api/health`, pages, owner sign-in, one pay-on-delivery order placed and cancelled,
+   `ops:readiness`. Rollback: Vercel Instant Rollback to the previous deployment; database: Neon branch/PITR taken
+   before migrating (`RUNBOOK-DATABASE.md`).
+
+## Business handover
+Day-to-day operation is in `docs/HANDOVER.md` (roles, morning checks, orders, refunds, stock, GST, wholesale). M12
+changes staff will notice: an admin account change with a weak new password now changes nothing at all; GST, shipping,
+price-list, price, MOQ and wholesale-terms edits fail visibly (and change nothing) if they cannot be recorded in the
+activity log; invoices show names typed in Telugu/Hindi/Tamil etc. in Latin letters; a wholesale buyer whose account is
+suspended mid-checkout is refused.
