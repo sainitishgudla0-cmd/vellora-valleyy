@@ -3,7 +3,7 @@ import { fail, json, parseBody } from "@/lib/api";
 import { requireAdmin } from "@/lib/auth/admin";
 import { writeAudit } from "@/lib/auth/audit";
 import { ADMIN_ROLES } from "@/lib/auth/roles";
-import { resetPassword, updateUser } from "@/lib/auth/users";
+import { updateUser } from "@/lib/auth/users";
 
 const schema = z.strictObject({
   role: z.enum(ADMIN_ROLES).optional(),
@@ -29,22 +29,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   // Successes are audited inside each change's transaction (P1-T4); only rejections are written here, best-effort.
   const rejected = (code: string) => writeAudit({ action: "user.update", outcome: "rejected", admin: auth.admin, targetType: "admin_user", targetId: id, details: { fields, code } });
 
-  let sessionsRevoked = 0;
-  if (Object.keys(patch).length > 0) {
-    const r = await updateUser(id, patch, auth.admin);
-    if (!r.ok) {
-      await rejected(r.code);
-      return r.code === "not_found" ? fail(r.message, 404) : Response.json({ error: r.message, code: r.code }, { status: 409 });
-    }
-    sessionsRevoked += r.sessionsRevoked;
+  // M12 VA-04: fields and an optional password reset are ONE change (validated first, one transaction, both audit rows
+  // in it), so a 4xx never leaves half of the request applied.
+  const r = await updateUser(id, patch, auth.admin, { password });
+  if (!r.ok) {
+    await rejected(r.code);
+    if (r.code === "not_found") return fail(r.message, 404);
+    if (r.code === "weak_password") return fail(r.message, 422, { password: r.message });
+    return Response.json({ error: r.message, code: r.code }, { status: 409 });
   }
-  if (password !== undefined) {
-    const r = await resetPassword(id, password, auth.admin);
-    if (!r.ok) {
-      await rejected(r.code);
-      return r.code === "not_found" ? fail(r.message, 404) : fail(r.message, 422, { password: r.message });
-    }
-    sessionsRevoked += r.sessionsRevoked;
-  }
+  const sessionsRevoked = r.sessionsRevoked;
   return json({ ok: true, sessionsRevoked });
 }

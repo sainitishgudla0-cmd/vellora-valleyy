@@ -1,6 +1,7 @@
 import "server-only";
 import { Prisma, type BusinessAccount, type BusinessAccountStatus, type PaymentTerms } from "@prisma/client";
 import { db } from "@/lib/db";
+import { writeAuditTx, type AuditActor } from "@/lib/auth/audit";
 import { validateGstin } from "./gstin";
 
 /**
@@ -82,7 +83,8 @@ export interface AccountPatch {
 }
 
 /** Staff change to an account. Status moves follow the graph; approving needs consistent terms; closing cancels open quotes. */
-export async function updateAccountAsAdmin(id: string, patch: AccountPatch, adminId: string): Promise<AccountResult<{ account: BusinessAccount }>> {
+export async function updateAccountAsAdmin(id: string, patch: AccountPatch, actor: AuditActor & { actorId: string }): Promise<AccountResult<{ account: BusinessAccount }>> {
+  const adminId = actor.actorId;
   return db.$transaction(async (tx) => {
       const current = await tx.businessAccount.findUnique({ where: { id } });
       if (!current) return fail("not_found", "Account not found");
@@ -113,6 +115,10 @@ export async function updateAccountAsAdmin(id: string, patch: AccountPatch, admi
           if (c.count === 1) await tx.quoteEvent.create({ data: { quoteId: q.id, fromStatus: q.status, toStatus: "cancelled", actorType: "admin", actorId: adminId } });
         }
       }
+      // status, terms, credit limit and price list decide what the buyer pays and may owe: the change commits only with
+      // its audit row (M12 VA-05). Field names and the new status/terms/limit only; the staff note is never copied.
+      const details = { fields: Object.keys(patch), ...(patch.status && { status: patch.status }), ...(patch.paymentTerms && { paymentTerms: patch.paymentTerms }), ...(patch.creditLimit !== undefined && { creditLimit: patch.creditLimit }), ...(patch.priceListId !== undefined && { priceListId: patch.priceListId }) };
+      await writeAuditTx(tx, { action: "business_account.update", outcome: "success", admin: actor, targetType: "business_account", targetId: id, details });
       return { ok: true as const, account: await tx.businessAccount.findUniqueOrThrow({ where: { id } }) };
   });
 }
@@ -121,6 +127,7 @@ export async function updateAccountAsAdmin(id: string, patch: AccountPatch, admi
 export async function convertEnquiry(
   enquiryId: string,
   input: { companyName: string; gstin: string; approve?: boolean; priceListId?: string | null; paymentTerms?: PaymentTerms; creditLimit?: number },
+  actor: AuditActor,
 ): Promise<AccountResult<{ account: BusinessAccount }>> {
   const g = validateGstin(input.gstin);
   if (!g.ok) return fail("invalid_gstin", g.error);
@@ -155,6 +162,8 @@ export async function convertEnquiry(
         },
       });
       await tx.enquiry.update({ where: { id: enquiryId }, data: { status: approve ? "closed" : "in_progress" } });
+      // an account created approved, with terms and a credit limit, is a financial change (M12 VA-05)
+      await writeAuditTx(tx, { action: "enquiry.convert", outcome: "success", admin: actor, targetType: "enquiry", targetId: enquiryId, details: { account: account.id, approved: account.status === "approved", paymentTerms: account.paymentTerms, creditLimit: account.creditLimit } });
       return { ok: true as const, account };
     });
   } catch (e) {

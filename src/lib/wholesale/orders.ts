@@ -11,6 +11,6 @@ import { accountPriceLines, creditCheck } from "./pricing";
 export function placeWholesaleOrder(account: BusinessAccount, customerId: string, input: Omit<OrderInput, "paymentMethod">, idempotency?: IdempotencyClaim) {
   return createOrder(
     { ...input, paymentMethod: "cod" },
-    { customerId, idempotency, wholesale: { businessAccountId: account.id, priceLines: accountPriceLines(account), beforeCreate: creditCheck(account) } },
+    { customerId, idempotency, wholesale: { businessAccountId: account.id, priceLines: accountPriceLines(), beforeCreate: creditCheck() } },
   );
 }

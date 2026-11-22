@@ -8,7 +8,9 @@ import { db } from "@/lib/db";
  * names only: never passwords, tokens, free-text reasons or customer data.
  *
  * Two classes (M11 P1-T4, finding F07, ADR 0021):
- *  - CRITICAL successes (money, payment state, accounts, roles, credentials; `CRITICAL_AUDIT_ACTIONS`) are written with
+ *  - CRITICAL successes (money, payment state, accounts, roles, credentials, and since M12 VA-05 the financial
+ *    configuration: GST rates, shipping fees, price lists and tiers, retail prices, MOQ/case packs, business-account
+ *    terms and credit limits; `CRITICAL_AUDIT_ACTIONS`) are written with
  *    `writeAuditTx` inside the transaction that makes the change. If the audit row cannot be written the change rolls
  *    back: no critical mutation exists without its evidence.
  *  - Everything else (rejections, denials, logins, catalogue and fulfilment edits) uses `writeAudit`: best-effort, a
@@ -27,7 +29,13 @@ export interface AuditEntry {
 }
 
 /** Actions whose successful outcome is only ever recorded in the same transaction as the change (`writeAuditTx`). */
-export const CRITICAL_AUDIT_ACTIONS = ["order.update", "order.refund.requested", "user.create", "user.update", "user.password_reset", "password.change", "owner.recover"] as const;
+export const CRITICAL_AUDIT_ACTIONS = [
+  "order.update", "order.refund.requested", "user.create", "user.update", "user.password_reset", "password.change", "owner.recover",
+  // M12 VA-05: financial configuration (what customers are charged, taxed and allowed to owe)
+  "tax_rate.create", "shipping_rule.create", "shipping_rule.update", "shipping_rule.delete",
+  "price_list.create", "price_list.update", "price_list.delete", "price_list.items",
+  "business_account.update", "enquiry.convert", "variant.price", "variant.wholesale",
+] as const;
 export type CriticalAuditAction = (typeof CRITICAL_AUDIT_ACTIONS)[number];
 
 /** Who performed a critical change: an admin context, or a named operator script (e.g. `admin:bootstrap`). */

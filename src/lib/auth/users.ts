@@ -41,7 +41,23 @@ export const listUsers = () => db.adminUser.findMany({ orderBy: { createdAt: "as
  * Role, active flag, name and unlock. The last active owner can never be demoted or deactivated (checked under a row
  * lock, so two owners cannot remove each other at the same time). Role/active changes end the user's sessions.
  */
-export async function updateUser(id: string, patch: { role?: AdminRole; active?: boolean; name?: string; unlock?: boolean }, actor: AuditActor): Promise<UserResult<{ user: PublicUser; sessionsRevoked: number }>> {
+export async function updateUser(
+  id: string,
+  patch: { role?: AdminRole; active?: boolean; name?: string; unlock?: boolean },
+  actor: AuditActor,
+  opts: { password?: string } = {},
+): Promise<UserResult<{ user: PublicUser; sessionsRevoked: number }>> {
+  // M12 VA-04: an optional password reset is part of the SAME change. It is validated (and hashed) before anything is
+  // written, and applied in the same transaction, so a weak password or a failed audit row leaves the account untouched.
+  let passwordHash: string | undefined;
+  if (opts.password !== undefined) {
+    const target = await db.adminUser.findUnique({ where: { id }, select: { email: true } });
+    if (!target) return fail("not_found", "Account not found");
+    const problem = passwordProblem(opts.password, target.email);
+    if (problem) return fail("weak_password", problem);
+    passwordHash = await hashPassword(opts.password);
+  }
+  const hasFields = Object.values(patch).some((v) => v !== undefined);
   return db.$transaction(async (tx) => {
     const owners = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT "id" FROM "AdminUser" WHERE "role" = 'owner' AND "active" ORDER BY "id" FOR UPDATE`);
     const current = await tx.adminUser.findUnique({ where: { id }, select: { role: true, active: true } });
@@ -51,30 +67,23 @@ export async function updateUser(id: string, patch: { role?: AdminRole; active?:
     const accessChanged = (patch.role !== undefined && patch.role !== current.role) || (patch.active !== undefined && patch.active !== current.active);
     const user = await tx.adminUser.update({
       where: { id },
-      data: { ...(patch.role && { role: patch.role }), ...(patch.active !== undefined && { active: patch.active }), ...(patch.name && { name: patch.name.trim() }), ...(patch.unlock && { failedLogins: 0, lockedUntil: null }) },
+      data: {
+        ...(patch.role && { role: patch.role }),
+        ...(patch.active !== undefined && { active: patch.active }),
+        ...(patch.name && { name: patch.name.trim() }),
+        ...((patch.unlock || passwordHash) && { failedLogins: 0, lockedUntil: null }),
+        ...(passwordHash && { passwordHash, passwordChangedAt: new Date() }),
+      },
       select: publicUser,
     });
-    const revoked = accessChanged ? (await tx.adminSession.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } })).count : 0;
-    const fields = Object.keys(patch).filter((k) => patch[k as keyof typeof patch] !== undefined);
-    await writeAuditTx(tx, { action: "user.update", outcome: "success", admin: actor, targetType: "admin_user", targetId: id, details: { fields, ...(patch.role !== undefined && { role: patch.role }), ...(patch.active !== undefined && { active: patch.active }), sessionsRevoked: revoked } });
+    const revoked = accessChanged || passwordHash ? (await tx.adminSession.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } })).count : 0;
+    if (hasFields) {
+      const fields = Object.keys(patch).filter((k) => patch[k as keyof typeof patch] !== undefined);
+      await writeAuditTx(tx, { action: "user.update", outcome: "success", admin: actor, targetType: "admin_user", targetId: id, details: { fields, ...(patch.role !== undefined && { role: patch.role }), ...(patch.active !== undefined && { active: patch.active }), sessionsRevoked: revoked } });
+    }
+    if (passwordHash) await writeAuditTx(tx, { action: "user.password_reset", outcome: "success", admin: actor, targetType: "admin_user", targetId: id, details: { sessionsRevoked: revoked } });
     return { ok: true as const, user, sessionsRevoked: revoked };
   });
-}
-
-/** Owner resets someone's password (or the bootstrap script resets the owner's). Ends all their sessions and clears any lock. */
-export async function resetPassword(id: string, newPassword: string, actor: AuditActor): Promise<UserResult<{ sessionsRevoked: number }>> {
-  const u = await db.adminUser.findUnique({ where: { id }, select: { email: true } });
-  if (!u) return fail("not_found", "Account not found");
-  const problem = passwordProblem(newPassword, u.email);
-  if (problem) return fail("weak_password", problem);
-  const passwordHash = await hashPassword(newPassword);
-  const revoked = await db.$transaction(async (tx) => {
-    await tx.adminUser.update({ where: { id }, data: { passwordHash, passwordChangedAt: new Date(), failedLogins: 0, lockedUntil: null } });
-    const n = (await tx.adminSession.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } })).count;
-    await writeAuditTx(tx, { action: "user.password_reset", outcome: "success", admin: actor, targetType: "admin_user", targetId: id, details: { sessionsRevoked: n } });
-    return n;
-  });
-  return { ok: true, sessionsRevoked: revoked };
 }
 
 /**
@@ -109,11 +118,15 @@ export async function changeOwnPassword(id: string, current: string, next: strin
   if (problem) return fail("weak_password", problem);
   const passwordHash = await hashPassword(next);
   const revoked = await db.$transaction(async (tx) => {
-    await tx.adminUser.update({ where: { id }, data: { passwordHash, passwordChangedAt: new Date() } });
+    // compare-and-set on the hash that was verified (M12 VA-04): if the password changed in between (a parallel change or
+    // an owner's reset), the "current password" this request proved is no longer current and nothing is written
+    const r = await tx.adminUser.updateMany({ where: { id, passwordHash: u.passwordHash }, data: { passwordHash, passwordChangedAt: new Date() } });
+    if (r.count !== 1) return null;
     const n = (await tx.adminSession.updateMany({ where: { userId: id, revokedAt: null, id: { not: keepSessionId } }, data: { revokedAt: new Date() } })).count;
     await writeAuditTx(tx, { action: "password.change", outcome: "success", admin: actor, targetType: "admin_user", targetId: id, details: { sessionsRevoked: n } });
     return n;
   });
+  if (revoked === null) return fail("wrong_password", "Current password is incorrect");
   return { ok: true, sessionsRevoked: revoked };
 }
 

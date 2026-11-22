@@ -2,6 +2,7 @@ import "server-only";
 import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { bucketKey, consume, type FailMode } from "@/lib/rate-limit-store";
+import { clientIp } from "@/lib/client-ip";
 
 /**
  * Fixed-window limiter keyed by bucket + client IP, shared across server instances through Postgres
@@ -39,6 +40,6 @@ export const failModeFor = (bucket: string): FailMode => RATE_LIMIT_POLICY[bucke
 
 export async function rateLimit(bucket: string, limit: number, windowMs: number) {
   const h = await headers();
-  const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || "local";
+  const ip = clientIp(h); // trusted-proxy aware (M12 VA-08): a client cannot choose its own key
   return consume(db, bucketKey(bucket, ip), limit, windowMs, failModeFor(bucket));
 }

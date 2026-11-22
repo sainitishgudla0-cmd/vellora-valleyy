@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { fail, json, parseBody } from "@/lib/api";
 import { requireAdmin } from "@/lib/auth/admin";
-import { writeAudit } from "@/lib/auth/audit";
+import { writeAudit, writeAuditTx } from "@/lib/auth/audit";
 import { priceListPatchSchema } from "@/lib/wholesale/schemas";
 
 export const dynamic = "force-dynamic";
@@ -22,10 +22,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { id } = await params;
   const parsed = await parseBody(req, priceListPatchSchema);
   if ("response" in parsed) return parsed.response;
-  const audit = (outcome: "success" | "rejected", code?: string) => writeAudit({ action: "price_list.update", outcome, admin: auth.admin, targetType: "price_list", targetId: id, details: { fields: Object.keys(parsed.data), ...(code ? { code } : {}) } });
+  const audit = (outcome: "rejected", code: string) => writeAudit({ action: "price_list.update", outcome, admin: auth.admin, targetType: "price_list", targetId: id, details: { fields: Object.keys(parsed.data), code } });
   try {
-    const l = await db.priceList.update({ where: { id }, data: parsed.data });
-    await audit("success");
+    const l = await db.$transaction(async (tx) => {
+      const list = await tx.priceList.update({ where: { id }, data: parsed.data });
+      await writeAuditTx(tx, { action: "price_list.update", outcome: "success", admin: auth.admin, targetType: "price_list", targetId: id, details: { fields: Object.keys(parsed.data), ...(parsed.data.active !== undefined && { active: parsed.data.active }) } });
+      return list;
+    });
     return json({ ok: true, priceList: { id: l.id, name: l.name, description: l.description, active: l.active } });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && (e.code === "P2025" || e.code === "P2002")) {
@@ -50,7 +53,9 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     await writeAudit({ action: "price_list.delete", outcome: "rejected", admin: auth.admin, targetType: "price_list", targetId: id, details: { code: "in_use" } });
     return Response.json({ error: "Accounts still use this price list. Deactivate it instead.", code: "in_use" }, { status: 409 });
   }
-  await db.priceList.delete({ where: { id } });
-  await writeAudit({ action: "price_list.delete", outcome: "success", admin: auth.admin, targetType: "price_list", targetId: id });
+  await db.$transaction(async (tx) => {
+    await tx.priceList.delete({ where: { id } });
+    await writeAuditTx(tx, { action: "price_list.delete", outcome: "success", admin: auth.admin, targetType: "price_list", targetId: id });
+  });
   return json({ ok: true });
 }

@@ -26,9 +26,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { id } = await params;
   const parsed = await parseBody(req, accountPatchSchema);
   if ("response" in parsed) return parsed.response;
-  const r = await updateAccountAsAdmin(id, parsed.data, auth.admin.actorId);
-  // field names and the status only: the staff note is not copied into the log
-  await writeAudit({ action: "business_account.update", outcome: r.ok ? "success" : "rejected", admin: auth.admin, targetType: "business_account", targetId: id, details: { fields: Object.keys(parsed.data), ...(parsed.data.status ? { status: parsed.data.status } : {}), ...(r.ok ? {} : { code: r.code }) } });
+  // a success is audited inside the change's transaction (M12 VA-05); only a rejection is written here, best-effort
+  const r = await updateAccountAsAdmin(id, parsed.data, auth.admin);
+  if (!r.ok) await writeAudit({ action: "business_account.update", outcome: "rejected", admin: auth.admin, targetType: "business_account", targetId: id, details: { fields: Object.keys(parsed.data), ...(parsed.data.status ? { status: parsed.data.status } : {}), code: r.code } });
   if (r.ok) return json({ ok: true, account: accountAdminView(r.account) });
   if (r.code === "not_found") return fail(r.message, 404);
   if (r.code === "credit_limit_required" || r.code === "price_list_not_found") return fail(r.message, 422);

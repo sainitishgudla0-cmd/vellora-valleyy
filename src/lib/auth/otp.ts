@@ -32,16 +32,22 @@ export async function issueOtp(emailInput: string, now = new Date()): Promise<Is
   if (!sender) return { ok: false, reason: "unavailable" };
   const email = normalizeEmail(emailInput);
   const eh = emailHash(email);
-  const recent = await db.otpChallenge.findMany({ where: { emailHash: eh, createdAt: { gt: new Date(now.getTime() - 3600_000) } }, orderBy: { createdAt: "desc" }, select: { createdAt: true } });
-  if (recent.length >= MAX_PER_HOUR) return { ok: false, reason: "too_many", retryAfterS: 600 };
-  const sinceLast = recent[0] ? (now.getTime() - recent[0].createdAt.getTime()) / 1000 : Infinity;
-  if (sinceLast < RESEND_COOLDOWN_S) return { ok: false, reason: "cooldown", retryAfterS: Math.ceil(RESEND_COOLDOWN_S - sinceLast) };
-
   const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
-  const [, challenge] = await db.$transaction([
-    db.otpChallenge.updateMany({ where: { emailHash: eh, consumedAt: null }, data: { consumedAt: now } }), // only the newest code is live
-    db.otpChallenge.create({ data: { emailHash: eh, codeHash: codeHash(eh, code), expiresAt: new Date(now.getTime() + OTP_TTL_MS) } }),
-  ]);
+  // M12 VA-06: the hourly cap, the cooldown and "one live code" are decided under a per-address transaction lock, so
+  // parallel requests for one address are serialised: exactly one passes the cooldown, the cap cannot be overrun, and
+  // at most one code is live. `createdAt` is written as `now` so the counters use the same clock as the checks.
+  const issued = await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT 1 AS "locked" FROM (SELECT pg_advisory_xact_lock(hashtextextended(${`otp:${eh}`}, 0))) AS l`;
+    const recent = await tx.otpChallenge.findMany({ where: { emailHash: eh, createdAt: { gt: new Date(now.getTime() - 3600_000) } }, orderBy: { createdAt: "desc" }, select: { createdAt: true } });
+    if (recent.length >= MAX_PER_HOUR) return { ok: false as const, reason: "too_many" as const, retryAfterS: 600 };
+    const sinceLast = recent[0] ? (now.getTime() - recent[0].createdAt.getTime()) / 1000 : Infinity;
+    if (sinceLast < RESEND_COOLDOWN_S) return { ok: false as const, reason: "cooldown" as const, retryAfterS: Math.ceil(RESEND_COOLDOWN_S - sinceLast) };
+    await tx.otpChallenge.updateMany({ where: { emailHash: eh, consumedAt: null }, data: { consumedAt: now } }); // only the newest code is live
+    const row = await tx.otpChallenge.create({ data: { emailHash: eh, codeHash: codeHash(eh, code), expiresAt: new Date(now.getTime() + OTP_TTL_MS), createdAt: now } });
+    return { ok: true as const, challenge: row };
+  });
+  if (!issued.ok) return issued;
+  const { challenge } = issued;
   try {
     await sender.send({ email, code });
   } catch (e) {

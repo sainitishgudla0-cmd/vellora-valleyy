@@ -1,4 +1,5 @@
 import "server-only";
+import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { availableUnits } from "./availability";
 import { applyStockChange, type StockActor } from "./ledger";
@@ -27,6 +28,8 @@ export interface VariantInventoryUpdate {
   stockAdjust?: { delta: number; reason: string };
   /** Compare-and-set (M11 P3-T3 stock import): refuse with `stock_changed` unless the on-hand count is still this value. */
   expectStockQuantity?: number;
+  /** Runs last, inside the same transaction (e.g. the admin route's price change, M12): if it throws, the stock change rolls back too. */
+  alsoInTransaction?: (tx: Prisma.TransactionClient) => Promise<void>;
 }
 
 /**
@@ -66,6 +69,7 @@ export async function updateVariantInventory(input: VariantInventoryUpdate): Pro
         const off = await tx.variant.updateMany({ where: { id: input.variantId, trackInventory: true, reserved: 0, stockQuantity: 0 }, data: { trackInventory: false } });
         if (off.count !== 1) throw new Abort(fail("reserved_open", "Open orders still hold units of this variant"));
       }
+      if (input.alsoInTransaction) await input.alsoInTransaction(tx);
       const after = await tx.variant.findUniqueOrThrow({ where: { id: input.variantId }, select: { trackInventory: true, stockQuantity: true, reserved: true } });
       return { ok: true as const, ...after, available: availableUnits(after) };
     });

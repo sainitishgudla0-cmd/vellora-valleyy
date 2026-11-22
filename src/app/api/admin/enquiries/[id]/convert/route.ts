@@ -12,8 +12,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const parsed = await parseBody(req, convertSchema);
   if ("response" in parsed) return parsed.response;
-  const r = await convertEnquiry(id, parsed.data);
-  await writeAudit({ action: "enquiry.convert", outcome: r.ok ? "success" : "rejected", admin: auth.admin, targetType: "enquiry", targetId: id, details: r.ok ? { account: r.account.id, approved: r.account.status === "approved" } : { code: r.code } });
+  const r = await convertEnquiry(id, parsed.data, auth.admin); // a success is audited in its transaction (M12 VA-05)
+  if (!r.ok) await writeAudit({ action: "enquiry.convert", outcome: "rejected", admin: auth.admin, targetType: "enquiry", targetId: id, details: { code: r.code } });
   if (r.ok) return json({ ok: true, accountId: r.account.id, status: r.account.status }, 201);
   if (r.code === "not_found") return fail(r.message, 404);
   if (r.code === "invalid_gstin" || r.code === "credit_limit_required" || r.code === "price_list_not_found") return fail(r.message, 422);

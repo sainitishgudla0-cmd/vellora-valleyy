@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { fail, json, parseBody } from "@/lib/api";
 import { requireAdmin } from "@/lib/auth/admin";
-import { writeAudit } from "@/lib/auth/audit";
+import { writeAudit, writeAuditTx } from "@/lib/auth/audit";
 import { priceTiersSchema } from "@/lib/wholesale/schemas";
 
 /**
@@ -15,7 +15,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   const parsed = await parseBody(req, priceTiersSchema);
   if ("response" in parsed) return parsed.response;
   const { variantId, tiers } = parsed.data;
-  const audit = (outcome: "success" | "rejected", code?: string) => writeAudit({ action: "price_list.items", outcome, admin: auth.admin, targetType: "price_list", targetId: id, details: { variantId, tiers: tiers.length, ...(code ? { code } : {}) } });
+  const audit = (outcome: "rejected", code: string) => writeAudit({ action: "price_list.items", outcome, admin: auth.admin, targetType: "price_list", targetId: id, details: { variantId, tiers: tiers.length, code } });
 
   const [list, variant] = await Promise.all([db.priceList.findUnique({ where: { id }, select: { id: true } }), db.variant.findUnique({ where: { id: variantId }, select: { id: true, mrp: true } })]);
   if (!list || !variant) {
@@ -31,7 +31,10 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     await audit("rejected", "invalid_tiers");
     return fail(problem, 422, { tiers: problem });
   }
-  await db.$transaction([db.priceListItem.deleteMany({ where: { priceListId: id, variantId } }), ...(sorted.length ? [db.priceListItem.createMany({ data: sorted.map((t) => ({ priceListId: id, variantId, minQty: t.minQty, unitPrice: t.unitPrice })) })] : [])]);
-  await audit("success");
+  await db.$transaction(async (tx) => {
+    await tx.priceListItem.deleteMany({ where: { priceListId: id, variantId } });
+    if (sorted.length) await tx.priceListItem.createMany({ data: sorted.map((t) => ({ priceListId: id, variantId, minQty: t.minQty, unitPrice: t.unitPrice })) });
+    await writeAuditTx(tx, { action: "price_list.items", outcome: "success", admin: auth.admin, targetType: "price_list", targetId: id, details: { variantId, tiers: sorted.map((t) => [t.minQty, t.unitPrice]) } });
+  });
   return json({ ok: true, tiers: sorted });
 }

@@ -81,7 +81,7 @@ describe("invoice PDF", () => {
 
   it("survives hostile and non-Latin text (escaped, no broken syntax) and spreads many lines over pages", () => {
     const s = renderInvoicePdf(payload({ hostile: true })).toString("latin1");
-    expect(s).toContain("Asha \\(Rao\\) \\\\ Rs. ??");
+    expect(s).toContain("Asha \\(Rao\\) \\\\ Rs. Asha"); // M12 VA-07: Telugu is transliterated (was "??")
     const many = renderInvoicePdf(payload({ lines: 70 }));
     expect(/\/Count (\d+)/.exec(many.toString("latin1"))![1]).not.toBe("1");
     expect(Number(/\/Count (\d+)/.exec(many.toString("latin1"))![1])).toBeGreaterThanOrEqual(2);

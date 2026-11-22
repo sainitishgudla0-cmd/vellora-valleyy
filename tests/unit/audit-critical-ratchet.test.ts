@@ -40,6 +40,19 @@ describe("critical audit ratchet", () => {
       "user.password_reset": "src/lib/auth/users.ts",
       "password.change": "src/lib/auth/users.ts",
       "owner.recover": "src/lib/auth/users.ts",
+      // M12 VA-05: financial configuration
+      "tax_rate.create": "src/app/api/admin/tax-rates/route.ts",
+      "shipping_rule.create": "src/app/api/admin/shipping-rules/route.ts",
+      "shipping_rule.update": "src/app/api/admin/shipping-rules/[id]/route.ts",
+      "shipping_rule.delete": "src/app/api/admin/shipping-rules/[id]/route.ts",
+      "price_list.create": "src/app/api/admin/price-lists/route.ts",
+      "price_list.update": "src/app/api/admin/price-lists/[id]/route.ts",
+      "price_list.delete": "src/app/api/admin/price-lists/[id]/route.ts",
+      "price_list.items": "src/app/api/admin/price-lists/[id]/items/route.ts",
+      "business_account.update": "src/lib/wholesale/accounts.ts",
+      "enquiry.convert": "src/lib/wholesale/accounts.ts",
+      "variant.price": "src/app/api/admin/variants/[id]/route.ts",
+      "variant.wholesale": "src/app/api/admin/variants/[id]/wholesale/route.ts",
     };
     expect(Object.keys(owners).sort()).toEqual([...CRITICAL_AUDIT_ACTIONS].sort());
     for (const [action, file] of Object.entries(owners)) {

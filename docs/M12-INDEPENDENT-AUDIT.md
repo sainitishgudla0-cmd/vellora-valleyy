@@ -1,0 +1,109 @@
+# M12 independent audit — findings, fixes, evidence, blockers
+
+Started 2026-11-22 from `backend/development` @ `0ec05ea` (M11 RC + docs). Branch `backend/m12-audit-fixes`, worktree
+`~/Developer/Velora-Valley-m12`. Decisions: ADR 0025. No separate M12 audit document existed in the repository; the
+eight suspected defects (VA-01..VA-08) came from the task brief and were each checked against the code before any change.
+
+## Summary
+| Id | Suspected defect | Verdict | Severity | Fix |
+|---|---|---|---|---|
+| VA-01 | Cross-account export/erasure | **Confirmed** | High (privacy, data integrity) | Orders matched by account, or unclaimed guest orders by verified email |
+| VA-02 | Silent checkout quantity truncation | **Confirmed** | Medium | Merged over-cap lines → `422` |
+| VA-03 | Stale wholesale approval / credit checks | **Confirmed** | High (credit exposure) | Account locked and re-read inside the order transaction |
+| VA-04 | Non-atomic admin user/password changes | **Confirmed** | Medium | One transaction; password validated first; CAS on self-change |
+| VA-05 | Financial configuration audits not transactional | **Confirmed** | Medium (evidence) | 12 actions made critical (`writeAuditTx`) + ratchet |
+| VA-06 | Concurrent OTP issuance | **Confirmed** | High (brute force, mail bombing) | Per-address advisory lock around limits + issue |
+| VA-07 | Unicode invoice rendering | **Confirmed** | Medium (legal document legibility) | WinAnsi mapping + Indic transliteration |
+| VA-08 | Origin/proxy validation weaknesses | **Partly confirmed** | Medium off Vercel, none on Vercel | Trusted-proxy client address; Origin check reviewed, unchanged |
+| M12-A01 | (new) Money above INT4 range → 500 | **Confirmed** | Low | `422` before insert (orders, quote pricing) |
+
+## Findings in detail
+**VA-01.** `exportCustomerData`/`eraseCustomer` matched `customerId = A OR email ILIKE A.email`. Checkout lets a signed-in
+customer B type any contact email, and claim-by-token links a guest order to B whatever its email. So A's export
+contained B's order (B's name and address), A's erasure anonymised B's order and **unlinked it from B's account**, and an
+open order of B's blocked A's erasure. Reproduced by 4 tests (`m12-audit.test.ts` VA-01). Root cause: the email branch
+did not require `customerId IS NULL`. Fix: `src/lib/account/erasure.ts` `orderWhere`.
+
+**VA-02.** `createOrder` merged duplicate lines with `Math.min(cap, …)`: `[{v,30},{v,30}]` became one line of 50 and
+the order was accepted (201) for fewer units than requested. The storefront cart cannot send duplicates, but the API
+can. Fix: merge exactly, refuse over-cap with `422 { fields.items }`.
+
+**VA-03.** `requireBusiness` loads the account before the order transaction; `accountPriceLines(account)` and
+`creditCheck(account)` closed over that snapshot. The row lock was taken only for credit accounts and the row was not
+re-read, so a suspension, a lowered credit limit, a switch from prepaid to credit, or a new price list committed in the
+window was ignored. Reproduced by 3 tests (order placed for a suspended account; for a lowered limit; for new credit
+terms). Fix: `lockActiveBusinessAccount` in `createOrder` (`FOR UPDATE` + re-read + approved check) for every
+wholesale order and quote acceptance; hooks receive the locked row. Parallel credit orders still cannot overrun the
+limit (test: 6 parallel orders with room for 2 → exactly 2 × 201, 4 × 409).
+
+**VA-04.** `PATCH /api/admin/users/[id]` ran `updateUser` (commit) and then `resetPassword` (second transaction).
+`{ role: "viewer", password: "short" }` returned 422 while the demotion and the session revocation had already
+committed; a failed `user.password_reset` audit insert likewise left the role change applied. Fix: one transaction;
+the password is validated and hashed before anything is written. `changeOwnPassword` now compare-and-sets on the
+verified hash (a parallel change or an owner reset can no longer be silently overwritten).
+
+**VA-05.** GST rates, shipping fees/serviceability, price lists and tiers, retail prices, MOQ/case packs, business
+account terms/credit limits and enquiry conversion (which can create an approved credit account) were audited with the
+best-effort `writeAudit` after commit. With the audit insert failing (trigger injection), every one of them committed
+without evidence. Fix: actions added to `CRITICAL_AUDIT_ACTIONS` and written with `writeAuditTx` in the change's
+transaction; price changes record `from`/`to` under a row lock (`variant.price`). The ratchet
+(`tests/unit/audit-critical-ratchet.test.ts`) pins each action to its owning module. Reviewed and left as is: quote
+pricing (its `QuoteEvent` rows are written in the same transaction), invoice issue (the gap-free `Invoice` row is the
+record), stock (`InventoryMovement` ledger).
+
+**VA-06.** `issueOtp` checked the hourly cap and the 30-second cooldown with a plain read, then retired old codes and
+inserted the new one in a batch transaction. 10 parallel requests for one address issued **6** live codes (6 emails,
+6 × 5 guesses); 20 parallel requests spread past the cooldown got **19** codes against a cap of 5. Fix: checks, retire
+and insert run inside a transaction holding `pg_advisory_xact_lock` on the address hash; the email is sent after commit
+(failure still deletes the code). After the fix: exactly 1 code; never more than 5 per hour.
+
+**VA-07.** `esc()` replaced everything outside Latin-1 with `?` per UTF-16 unit. Reproduced on the pre-fix renderer:
+a Telugu buyer name printed `?????????? ??????`, `D’Souza – Café` printed `D?Souza ? Café`, and a decomposed `José`
+printed `Jose?`; `fit()` could split surrogate pairs. Fix: `src/lib/invoices/pdf-text.ts` (`toPdfText`): NFC, rupee
+sign → `Rs.`, typographic punctuation → its WinAnsi glyph, Devanagari/Bengali/Gurmukhi/Gujarati/Odia/Tamil/Telugu/
+Kannada/Malayalam transliterated through one ISCII-ordered table (`శ్రీనివాస్ రెడ్డి` → `Shriinivaas Reddi`), Latin
+diacritics folded, other characters one `?` each; `fit()` counts drawn glyphs. One existing test asserted the defect
+(`అశ` → `??`) and now asserts `Asha`. Limitation: the PDF shows a Latin transliteration, not the native script
+(an embedded Unicode font with shaping would be needed for that).
+
+**VA-08.** (a) Rate-limit key = first `X-Forwarded-For` entry. Correct on Vercel (Vercel overwrites the header), but on
+any other host (the Render GitHub app is installed on the repository; `next start` behind nginx) a client can rotate
+the value per request and bypass the sign-in-code, admin-login and checkout limits. Fix: `src/lib/client-ip.ts`
+(Vercel: the address Vercel sets; elsewhere `TRUSTED_PROXY_HOPS`, default 1, from the right; too few hops → one shared
+`untrusted` key; `X-Real-IP` ignored off Vercel). (b) Origin check: compared with `X-Forwarded-Host`/`Host`, no scheme.
+Not a defect: a cross-site browser request cannot carry a custom `X-Forwarded-Host` without a CORS preflight the app
+never grants, and session cookies are `Secure`; a scheme check would risk refusing legitimate requests behind TLS
+proxies. Unchanged, documented in ADR 0025.
+
+**M12-A01 (new).** Money columns are INT4 paise. A wholesale order of 1,000 × ₹50,000 (5e9 paise) failed the insert and
+returned **500**; quote pricing likewise. Fix: refuse with `422` before writing.
+
+## Other areas inspected (no defect found)
+Order/payment state machine and admin order edits; `/verify` (signature before any write, server-side capture lookup,
+amount/currency/mode checks); webhook (raw-body HMAC, dedupe, orphan captures); refunds (owner-only, row lock,
+balance); stock holds and expiry; guest invoice/order token checks (`safeEqual`); account and business route ownership
+scoping (addresses, orders, invoices, quotes); cron routes (24+ char bearer, constant-time compare, 404 when unset);
+test-only routes (404 outside disposable dev/test with mock sender); email templates (every variable HTML-escaped);
+security headers; `npm audit` 0.
+
+## Tests and evidence
+- New: `tests/integration/m12-audit.test.ts` (25 tests), `tests/unit/m12-audit.test.ts` (12 tests). **Against the
+  pre-fix code: 19 of the first 24 integration tests failed** (the 5 that passed are the controls: own/guest export, exact
+  merge, parallel credit, combined change, sign-in); the unit tests target modules that did not exist, and the pre-fix
+  renderer output for VA-07 is quoted above.
+- After the fixes (Node 24.22.3, disposable Postgres 16 on 127.0.0.1:54331): `npm run verify` → typecheck ok, lint
+  0 errors / 12 warnings (unchanged ratchet), unit **672/672**, env gate ok; `npm run test:integration` **659/659**
+  (634 existing + 25 new); `npm audit` 0.
+- `verify:full` + `VERIFY_UI=1` on a fresh disposable DB (`velora_m12_full`): all gates passed — migrate deploy, schema
+  drift none, seed, integration 658/658, build, API smoke 70/0, Playwright 38 passed / 22 visual skipped (this worktree
+  has no local baselines; the CI `visual` job compares against the approved commit). It ran before the final review fix
+  (stock + price in one transaction, +1 test); unit and integration were re-run on the final code (672 / 659).
+- Self-review (`/review`): one medium finding — a combined stock + price request committed the stock change before the
+  price transaction, so a failed price audit returned 500 after the stock moved (a retry would double it). Fixed:
+  `updateVariantInventory({ alsoInTransaction })`; regression test added.
+- 
+## Progress
+_(updated as work proceeds)_
+
+## Deployment (Phases 5–7) — status and blockers
+See the "Launch blockers" section (filled in once CI and the Vercel checks are done).

@@ -1,6 +1,6 @@
 import "server-only";
 import crypto from "node:crypto";
-import { Prisma } from "@prisma/client";
+import { Prisma, type BusinessAccount } from "@prisma/client";
 import { db } from "./db";
 import { reserveForOrder } from "./inventory/order-stock";
 import { enqueueOutbox } from "./notify/outbox";
@@ -62,11 +62,11 @@ export interface WholesaleHooks {
    * Runs inside the order transaction with the loaded variants and merged quantities. Returns the unit price (paise) per
    * variant id, and throws an OrderError for anything the buyer's terms forbid (MOQ, case pack). Retail orders never set this.
    */
-  priceLines: (tx: Prisma.TransactionClient, lines: { variant: { id: string; price: number; mrp: number; name: string; label: string }; quantity: number }[]) => Promise<Map<string, number>>;
+  priceLines: (tx: Prisma.TransactionClient, lines: { variant: { id: string; price: number; mrp: number; name: string; label: string }; quantity: number }[], account: BusinessAccount) => Promise<Map<string, number>>;
   /** Delivery fee in paise; defaults to the site fee. */
   deliveryFee?: number;
   /** Runs once totals are known, before anything is written (credit limit). Throw to refuse. */
-  beforeCreate?: (tx: Prisma.TransactionClient, totals: { subtotal: number; total: number }) => Promise<void>;
+  beforeCreate?: (tx: Prisma.TransactionClient, totals: { subtotal: number; total: number }, account: BusinessAccount) => Promise<void>;
   /** Runs in the same transaction right after the order row exists (e.g. claiming the quote). Throw to roll everything back. */
   afterCreate?: (tx: Prisma.TransactionClient, order: { id: string; number: string; total: number }) => Promise<void>;
 }
@@ -78,15 +78,33 @@ export interface CreateOrderOptions {
   wholesale?: WholesaleHooks;
 }
 
+/**
+ * Money columns are Postgres INTEGER (paise): ₹2,14,74,836.47 at most. A larger line or total is refused with a clear
+ * message instead of failing the insert with a 500 (M12-A01); such an order is arranged with the team directly.
+ */
+export const MAX_MONEY = 2_147_483_647;
+const tooLarge = () => new OrderError("This order is too large to place online. Please contact us to arrange it.", 422, { items: "Order total too large" });
+
+/** Locks the business account row for this transaction and refuses unless it is approved right now (M12 VA-03). */
+async function lockActiveBusinessAccount(tx: Prisma.TransactionClient, id: string): Promise<BusinessAccount> {
+  await tx.$queryRaw`SELECT "id" FROM "BusinessAccount" WHERE "id" = ${id} FOR UPDATE`;
+  const account = await tx.businessAccount.findUnique({ where: { id } });
+  if (!account || account.status !== "approved") throw new OrderError("Your business account is not active.", 403);
+  return account;
+}
+
 /** Retail lines are capped at 50 units; wholesale buyers order in bulk. */
 const RETAIL_LINE_CAP = 50;
 const WHOLESALE_LINE_CAP = 100_000;
 
 export async function createOrder(input: OrderInput, opts: CreateOrderOptions = {}) {
-  // merge duplicate lines
+  // Merge duplicate lines. A merged line over the cap is refused, never truncated (M12 VA-02): the customer must be
+  // charged for exactly what they asked for, or told why not.
   const qty = new Map<string, number>();
   const cap = opts.wholesale ? WHOLESALE_LINE_CAP : RETAIL_LINE_CAP;
-  for (const i of input.items) qty.set(i.variantId, Math.min(cap, (qty.get(i.variantId) ?? 0) + i.quantity));
+  for (const i of input.items) qty.set(i.variantId, (qty.get(i.variantId) ?? 0) + i.quantity);
+  if ([...qty.values()].some((q) => q > cap))
+    throw new OrderError(`You can order at most ${cap.toLocaleString("en-IN")} of one item in a single order. Please reduce the quantity.`, 422, { items: `At most ${cap.toLocaleString("en-IN")} per item` });
 
   const isOnline = input.paymentMethod === "razorpay";
   // Mode and provider come from trusted server configuration; the request body has no say in either.
@@ -124,6 +142,11 @@ async function insertOrder(
     await tx.idempotencyKey.create({ data: { keyHash: claim.keyHash, requestHash: claim.requestHash, expiresAt: new Date(now.getTime() + IDEMPOTENCY_TTL_MS) } });
   }
 
+  // Wholesale (M12 VA-03): the account is locked and re-read here, inside the order transaction, so a suspension, a lower
+  // credit limit, new terms or a new price list committed after the request was authorised are the ones that apply.
+  // Staff changes to the account update the same row, so they wait for (or are waited on by) this transaction.
+  const account = wholesale ? await lockActiveBusinessAccount(tx, wholesale.businessAccountId) : null;
+
   const variants = await tx.variant.findMany({
     where: { id: { in: [...qty.keys()] } },
     include: { product: { select: { name: true, active: true } } },
@@ -134,7 +157,7 @@ async function insertOrder(
   if (unavailable.length) throw new OrderError(`${unavailable.map((v) => v.product.name).join(", ")} is currently unavailable.`, 409);
 
   // Retail: the catalogue price. Wholesale: whatever the buyer's terms resolve to (the hook enforces MOQ and case packs).
-  const wholesalePrices = wholesale ? await wholesale.priceLines(tx, variants.map((v) => ({ variant: { id: v.id, price: v.price, mrp: v.mrp, name: v.product.name, label: v.label }, quantity: qty.get(v.id)! }))) : null;
+  const wholesalePrices = wholesale ? await wholesale.priceLines(tx, variants.map((v) => ({ variant: { id: v.id, price: v.price, mrp: v.mrp, name: v.product.name, label: v.label }, quantity: qty.get(v.id)! })), account!) : null;
   const items = variants.map((v) => {
     const quantity = qty.get(v.id)!;
     const unitPrice = wholesalePrices ? wholesalePrices.get(v.id) : v.price;
@@ -150,12 +173,14 @@ async function insertOrder(
     };
   });
   const subtotal = items.reduce((s, i) => s + i.lineTotal, 0);
+  if (items.some((i) => i.lineTotal > MAX_MONEY) || subtotal > MAX_MONEY) throw tooLarge();
   // Serviceability applies to every order; the fee comes from the shipping rules unless a quote fixed it (M7-T3).
   const shipping = await quoteShipping(tx, input.pincode, subtotal);
   if (!shipping.serviceable) throw new OrderError("Sorry, we do not deliver to this pincode yet.", 422, { pincode: "We do not deliver to this pincode yet" });
   const deliveryFee = wholesale?.deliveryFee ?? shipping.fee;
   const total = subtotal + deliveryFee;
-  if (wholesale?.beforeCreate) await wholesale.beforeCreate(tx, { subtotal, total });
+  if (total > MAX_MONEY) throw tooLarge();
+  if (wholesale?.beforeCreate) await wholesale.beforeCreate(tx, { subtotal, total }, account!);
 
   // GST snapshot (M7-T1): frozen now from the rates in force today; lines without a configured rate stay NULL and are filled at invoice time.
   const sellerCode = stateCode(site.address.state);

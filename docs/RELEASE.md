@@ -58,6 +58,7 @@ Use when the only owner is locked out, deactivated, has forgotten the password, 
 | `CUSTOMER_OTP_MODE`, `NOTIFY_MODE` | unset (off) until the provider is set up; then `email` / `smtp` | unset, or `email` / `smtp` with a test mailbox | mock modes are refused in preview/production (M11 P3-T1, ADR 0023) |
 | `SMTP_URL` | `smtps://USER:PASS@host:465` (or `smtp://…:587`, STARTTLS enforced) from the chosen email provider | the provider's sandbox/test credentials | **secret**; URL-encode the password; credentials required outside dev/test |
 | `EMAIL_FROM` | e.g. `Velora Valley <orders@your-domain>` on a domain verified with the provider (SPF/DKIM) | same | business decision: sender name and address |
+| `TRUSTED_PROXY_HOPS` | unset on Vercel (ignored there) | unset | M12 VA-08: only off Vercel. Number of reverse proxies in front of the app that append to `X-Forwarded-For` (default 1). Wrong values weaken or over-tighten the sign-in and checkout rate limits |
 | `SESSION_SECRET`, `CRON_SECRET` | set, random, different per scope | set | `SESSION_SECRET` also keys the rate-limit IP hashes |
 | `SELLER_GSTIN` | set when invoices start | — | with accountant-approved `TaxRate` rows |
 | `RATE_LIMIT_STORE` | unset (database) | unset | `memory` only to debug locally; `env:check` refuses it in preview/production (M11 P1-T6) |

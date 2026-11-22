@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { json, parseBody } from "@/lib/api";
 import { requireAdmin } from "@/lib/auth/admin";
-import { writeAudit } from "@/lib/auth/audit";
+import { writeAudit, writeAuditTx } from "@/lib/auth/audit";
 import { shippingRuleSchema } from "@/lib/fulfilment/schemas";
 
 export const dynamic = "force-dynamic";
@@ -21,8 +21,11 @@ export async function POST(req: Request) {
   const parsed = await parseBody(req, shippingRuleSchema);
   if ("response" in parsed) return parsed.response;
   try {
-    const r = await db.shippingRule.create({ data: { ...parsed.data, freeAboveSubtotal: parsed.data.freeAboveSubtotal ?? null } });
-    await writeAudit({ action: "shipping_rule.create", outcome: "success", admin: auth.admin, targetType: "shipping_rule", targetId: r.id, details: { pincodePrefix: r.pincodePrefix, serviceable: r.serviceable, fee: r.fee } });
+    const r = await db.$transaction(async (tx) => {
+      const rule = await tx.shippingRule.create({ data: { ...parsed.data, freeAboveSubtotal: parsed.data.freeAboveSubtotal ?? null } });
+      await writeAuditTx(tx, { action: "shipping_rule.create", outcome: "success", admin: auth.admin, targetType: "shipping_rule", targetId: rule.id, details: { pincodePrefix: rule.pincodePrefix, serviceable: rule.serviceable, fee: rule.fee, freeAboveSubtotal: rule.freeAboveSubtotal, active: rule.active } });
+      return rule;
+    });
     return json({ rule: r }, 201);
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {

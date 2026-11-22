@@ -1,8 +1,9 @@
 import { formatInr, formatRate } from "./format";
+import { toPdfText } from "./pdf-text";
 import type { InvoicePayload } from "./payload";
 
 /**
- * Minimal, dependency-free PDF writer for the tax invoice (M7-T2). Standard Helvetica fonts only, WinAnsi text, A4,
+ * Minimal, dependency-free PDF writer for the tax invoice (M7-T2). Standard Helvetica fonts only, WinAnsi text (see pdf-text.ts), A4,
  * no dates or random ids: the same payload always yields the same bytes (asserted in tests).
  */
 const W = 595.28;
@@ -13,10 +14,9 @@ const M = 36; // margin
 const WIDTHS: Record<string, number> = { " ": 278, ",": 278, ".": 278, "-": 333, "%": 889, "/": 278, "0": 556, "1": 556, "2": 556, "3": 556, "4": 556, "5": 556, "6": 556, "7": 556, "8": 556, "9": 556, R: 722, s: 500 };
 const width = (t: string, size: number) => ([...t].reduce((s, ch) => s + (WIDTHS[ch] ?? 560), 0) * size) / 1000;
 
-/** Latin-1 safe text: the rupee sign and other non-Latin-1 characters are replaced; parentheses and backslashes are escaped. */
+/** WinAnsi-safe text (`toPdfText`, M12 VA-07: transliterated Indian scripts, typographic punctuation kept); parentheses and backslashes escaped. */
 function esc(t: string): string {
-  const safe = t.replace(/₹/g, "Rs.").replace(/[^\x20-\x7e\xa0-\xff]/g, "?");
-  return safe.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+  return toPdfText(t).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
 }
 
 class Page {
@@ -35,7 +35,11 @@ class Page {
   }
 }
 
-const fit = (t: string, maxChars: number) => (t.length <= maxChars ? t : `${t.slice(0, Math.max(0, maxChars - 1))}.`);
+/** Shortens to `maxChars` glyphs as they will be drawn (after transliteration), never splitting a character. */
+const fit = (t: string, maxChars: number) => {
+  const glyphs = [...toPdfText(t)];
+  return glyphs.length <= maxChars ? glyphs.join("") : `${glyphs.slice(0, Math.max(0, maxChars - 1)).join("")}.`;
+};
 const money = (p: number) => formatInr(p);
 
 /** Column right edges (points) for the numeric columns, and the left edge of the description. */

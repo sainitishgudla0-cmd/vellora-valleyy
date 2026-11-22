@@ -2,7 +2,7 @@ import "server-only";
 import crypto from "node:crypto";
 import { Prisma, type BusinessAccount } from "@prisma/client";
 import { db } from "@/lib/db";
-import { createOrder, OrderError } from "@/lib/orders";
+import { createOrder, MAX_MONEY, OrderError } from "@/lib/orders";
 import type { OrderInput } from "@/lib/validation";
 import { site } from "@/config/site";
 import { enqueueOutbox } from "@/lib/notify/outbox";
@@ -125,6 +125,9 @@ export async function priceQuote(quoteId: string, pricing: QuotePricing, adminId
       const p = price.get(i.variantId)!;
       if (!Number.isInteger(p) || p <= 0 || p > (mrp.get(i.variantId) ?? 0)) return fail("validation", `${i.productName} (${i.variantLabel}): the price must be above zero and not above the MRP`, { [i.variantId]: "Invalid price" });
     }
+    // money columns are INTEGER paise (M12-A01): a quote whose total would not fit is refused before anything is written
+    const totalOf = q.items.reduce((s, i) => s + price.get(i.variantId)! * i.quantity, 0) + deliveryFee;
+    if (totalOf > MAX_MONEY) return fail("validation", "This quote is too large to price online. Split it into smaller quotes.", { items: "Quote total too large" });
     let subtotal = 0;
     for (const i of q.items) {
       const unitPrice = price.get(i.variantId)!;
@@ -194,7 +197,7 @@ export async function acceptQuote(
           if (lines.length !== prices.size || lines.some((l) => !prices.has(l.variant.id))) throw new QuoteAbort("items_mismatch", "The quoted items are no longer available as quoted");
           return new Map(lines.map((l) => [l.variant.id, prices.get(l.variant.id)!]));
         },
-        beforeCreate: creditCheck(account),
+        beforeCreate: creditCheck(),
         afterCreate: async (tx, o) => {
           const fresh = await tx.quote.findUnique({ where: { id: quote.id }, select: { validUntil: true, total: true } });
           if (!fresh?.validUntil || fresh.validUntil <= new Date()) throw new QuoteAbort("quote_expired", "This quote has expired. Please request a new one.");

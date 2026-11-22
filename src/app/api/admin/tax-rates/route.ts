@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { json, parseBody } from "@/lib/api";
 import { requireAdmin } from "@/lib/auth/admin";
-import { writeAudit } from "@/lib/auth/audit";
+import { writeAudit, writeAuditTx } from "@/lib/auth/audit";
 import { taxRateSchema } from "@/lib/fulfilment/schemas";
 
 export const dynamic = "force-dynamic";
@@ -25,8 +25,12 @@ export async function POST(req: Request) {
   if ("response" in parsed) return parsed.response;
   const { code, rateBp, effectiveFrom, note } = parsed.data;
   try {
-    const r = await db.taxRate.create({ data: { code, rateBp, effectiveFrom: new Date(`${effectiveFrom}T00:00:00.000Z`), note: note ?? null } });
-    await writeAudit({ action: "tax_rate.create", outcome: "success", admin: auth.admin, targetType: "tax_rate", targetId: r.id, details: { code, rateBp, effectiveFrom } });
+    // the rate and its audit row commit together (M12 VA-05)
+    const r = await db.$transaction(async (tx) => {
+      const row = await tx.taxRate.create({ data: { code, rateBp, effectiveFrom: new Date(`${effectiveFrom}T00:00:00.000Z`), note: note ?? null } });
+      await writeAuditTx(tx, { action: "tax_rate.create", outcome: "success", admin: auth.admin, targetType: "tax_rate", targetId: row.id, details: { code, rateBp, effectiveFrom } });
+      return row;
+    });
     return json({ rate: { id: r.id, code, rateBp, effectiveFrom, note: r.note } }, 201);
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {

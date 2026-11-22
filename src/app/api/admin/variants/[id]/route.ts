@@ -1,8 +1,9 @@
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { fail, json, parseBody } from "@/lib/api";
 import { requireAdmin } from "@/lib/auth/admin";
-import { writeAudit } from "@/lib/auth/audit";
+import { writeAudit, writeAuditTx } from "@/lib/auth/audit";
 import { effectiveInStock } from "@/lib/inventory/availability";
 import { MAX_STOCK_DELTA, updateVariantInventory } from "@/lib/inventory/adjust";
 
@@ -47,25 +48,34 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return fail("You do not have permission to change these fields", 403);
   }
 
+  // The catalogue part (price, manual flag). A price change commits only with its audit row, old and new price included
+  // (M12 VA-05); the row lock makes `from` exact. Tracked variants ignore the manual flag (counts decide).
+  const catalogStep = async (tx: Prisma.TransactionClient) => {
+    const row = (await tx.$queryRaw<{ price: number; trackInventory: boolean }[]>`SELECT "price", "trackInventory" FROM "Variant" WHERE "id" = ${id} FOR UPDATE`)[0];
+    if (!row) return null;
+    const manualFlag = inStock !== undefined && !row.trackInventory ? { inStock } : {};
+    const updated = await tx.variant.update({ where: { id }, data: { ...(price !== undefined && { price: Math.round(price * 100) }), ...manualFlag } });
+    if (price !== undefined) await writeAuditTx(tx, { action: "variant.price", outcome: "success", admin, targetType: "variant", targetId: id, details: { from: row.price, to: updated.price } });
+    return updated;
+  };
+
+  // Stock and catalogue changes in one request are ONE transaction (M12 review): a failed price audit must not leave a
+  // committed stock adjustment behind (a retry would apply the delta twice).
+  let v: Awaited<ReturnType<typeof catalogStep>>;
   if (touchesInventory) {
-    const r = await updateVariantInventory({ variantId: id, actor: { type: "admin", id: admin.actorId }, trackInventory, reason: parsed.data.reason, stockAdjust });
+    let updated: Awaited<ReturnType<typeof catalogStep>> = null;
+    const r = await updateVariantInventory({
+      variantId: id, actor: { type: "admin", id: admin.actorId }, trackInventory, reason: parsed.data.reason, stockAdjust,
+      ...(touchesCatalog && { alsoInTransaction: async (tx: Prisma.TransactionClient) => void (updated = await catalogStep(tx)) }),
+    });
     if (!r.ok) {
       await audit("rejected", { code: r.code });
       return r.code === "not_found" ? fail(r.message, 404) : conflict(r.code, r.message);
     }
+    v = touchesCatalog ? updated : await db.variant.findUnique({ where: { id } });
+  } else {
+    v = await db.$transaction(catalogStep); // a failed audit insert throws: nothing changed, and the caller is told so
   }
-
-  const current = await db.variant.findUnique({ where: { id }, select: { trackInventory: true } });
-  if (!current) {
-    await audit("rejected", { code: "not_found" });
-    return fail("Variant not found", 404);
-  }
-  const v = await db.variant
-    .update({
-      where: { id },
-      data: { ...(price !== undefined && { price: Math.round(price * 100) }), ...(inStock !== undefined && !current.trackInventory && { inStock }) },
-    })
-    .catch(() => null);
   if (!v) {
     await audit("rejected", { code: "not_found" });
     return fail("Variant not found", 404);

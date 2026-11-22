@@ -7,7 +7,7 @@ import { keyedHash } from "@/lib/auth/customer";
  * Data export and erasure for a customer (M5-T6, DPDP Act 2023, ADR 0013).
  *
  * EXPORT returns everything held about the person as JSON: profile, addresses, consent history, orders (placed while
- * signed in AND guest orders under the same email), enquiries and newsletter status. No tokens, gateway ids, hashes or
+ * signed in AND unclaimed guest orders under the same email), enquiries and newsletter status. No tokens, gateway ids, hashes or
  * staff-written reasons.
  *
  * ERASURE removes the account and what hangs off it (sessions, addresses, consent records, sign-in challenges,
@@ -20,7 +20,12 @@ import { keyedHash } from "@/lib/auth/customer";
 export const OPEN_ORDER_STATUSES = ["pending_confirmation", "awaiting_payment", "confirmed", "paid", "dispatched"] as const;
 export const ERASED_EMAIL = "erased@erased.invalid";
 
-const orderWhere = (customerId: string, email: string) => ({ OR: [{ customerId }, { email: { equals: email, mode: "insensitive" as const } }] });
+/**
+ * The person's orders: those linked to their account, plus UNCLAIMED guest orders placed with their verified email.
+ * An order linked to another account is never included, even when its contact email matches (M12 VA-01): checkout and
+ * claim-by-token both let an order of B's carry A's address, and A must not export, erase or be blocked by it.
+ */
+const orderWhere = (customerId: string, email: string) => ({ OR: [{ customerId }, { customerId: null, email: { equals: email, mode: "insensitive" as const } }] });
 
 export async function exportCustomerData(customerId: string) {
   const customer = await db.customer.findUnique({ where: { id: customerId } });
