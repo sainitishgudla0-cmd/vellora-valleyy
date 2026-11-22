@@ -98,6 +98,11 @@ security headers; `npm audit` 0.
   drift none, seed, integration 658/658, build, API smoke 70/0, Playwright 38 passed / 22 visual skipped (this worktree
   has no local baselines; the CI `visual` job compares against the approved commit). It ran before the final review fix
   (stock + price in one transaction, +1 test); unit and integration were re-run on the final code (672 / 659).
+- Release rehearsals on the final code (`04271ca`, disposable DB `velora_m12_full`): `db:baseline-rehearsal` all checks
+  passed (baseline + redeploy applies every migration, schema diff none); `db:restore-drill` passed (dump → restore into
+  a scratch DB → checksums/migrations/drift equal); `db:migrate:status` 15 migrations, up to date; `test:perf` against a
+  local production build: every page/API p95 ≤ 16 ms (budget 2,000 ms), 40 simultaneous checkouts for 5 tracked units →
+  5 placed, 35 × 409, 0 errors (no oversell). Accessibility spec ran inside the browser suite (passed).
 - Self-review (`/review`): one medium finding — a combined stock + price request committed the stock change before the
   price transaction, so a failed price audit returned 500 after the stock moved (a retry would double it). Fixed:
   `updateVariantInventory({ alsoInTransaction })`; regression test added.
@@ -112,6 +117,14 @@ security headers; `npm audit` 0.
 | Integration into `backend/development` | **done** | fast-forward `0ec05ea..8ed5b3f` (no concurrent commits, no merge commit, no force push); CI run 45074396960 green, all three jobs (https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/45074396960) |
 | `main` promotion | **not done — unsafe** | "Launch blockers" 2 |
 | Vercel staging / production | **blocked** | "Launch blockers" 1 |
+
+## Deployment decision (2026-11-22)
+**Staging and production were deliberately not deployed.** Deploying this commercial store on the Hobby account would
+breach Vercel's terms, and the deployment would be rejected anyway unless the payment-expiry, reconciliation and email
+crons were cut to once a day (which would leave customers' stock held and payments unreconciled for up to a day). Paying
+for a plan or starting a trial is the owner's decision. Everything that does not need Vercel was completed and verified
+above. No Vercel project, database or environment variable was created or changed; `velora-valley-v3` and Nitish's
+infrastructure were not touched; `main` is unchanged (`55aa848`); live payments remain disabled (no live keys anywhere).
 
 ## Launch blockers (exact; each needs the owner)
 1. **Vercel plan.** The connected account (`devarchith5-1566`, scope `devarchith-s-projects`) is on **Hobby**
