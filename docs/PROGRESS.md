@@ -9,7 +9,7 @@ _Read this first in a new session. Keep it under ~80 lines. Scope and AC per tas
 
 ## M12 (active) — report: `docs/M12-INDEPENDENT-AUDIT.md`, ADR 0025
 - Branch `backend/m12-audit-fixes` (worktree `~/Developer/Velora-Valley-m12`) from `backend/development` @ `0ec05ea`. VA-01..VA-07 confirmed and fixed, VA-08 partly (rate-limit client address; Origin check unchanged by decision), new M12-A01 (INT4 money overflow → 422). Regression tests `tests/{integration,unit}/m12-audit.test.ts` (19 of the integration tests failed before the fixes).
-- **Deployment blocked on the owner:** the connected Vercel account is on **Hobby** (non-commercial use only; crons limited to daily, so this repo's 10/15-minute crons fail at deploy). `main` not promoted: a push may build Nitish's production project against a database without the backend migrations. Details and exact steps: the audit report, "Launch blockers".
+- **Deployment:** Vercel team `devarchith-s-projects` is **Pro** (an earlier note said Hobby: that was the personal user record). Staging in progress in a NEW project; `velora-valley-v3` untouched. `main` not promoted (a push may build Nitish's production project against a database without the backend migrations). Status and blockers: the audit report.
 
 ## M11 — tracker: `docs/M11-RELEASE-READINESS.md`
 - Branch `backend/m11-stabilization`; `backend/development` @ `b2862da` (CI green). P0 audit done; **P1-T1 done**; **P1-T3 (F06) done** (`95e1323`, ADR 0020, integrated on top of the RC stack).

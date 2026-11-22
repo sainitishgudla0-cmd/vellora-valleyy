@@ -116,28 +116,19 @@ security headers; `npm audit` 0.
 | CI on `backend/m12-audit-fixes` @ `8ed5b3f` | **green** | run 45073494195 (https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/45073494195): checks; migrate + integration + build + smoke 70/0 + browser 38 passed / 22 visual skipped; `visual` job 22/22 identical to approved `1aefdd8` |
 | Integration into `backend/development` | **done** | fast-forward `0ec05ea..8ed5b3f` (no concurrent commits, no merge commit, no force push); CI run 45074396960 green, all three jobs (https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/45074396960) |
 | `main` promotion | **not done — unsafe** | "Launch blockers" 2 |
-| Vercel staging / production | **blocked** | "Launch blockers" 1 |
+| Vercel staging / production | in progress under `devarchith-s-projects` (Pro) | "Staging" below |
 
-## Deployment decision (2026-11-22)
-**Staging and production were deliberately not deployed.** Deploying this commercial store on the Hobby account would
-breach Vercel's terms, and the deployment would be rejected anyway unless the payment-expiry, reconciliation and email
-crons were cut to once a day (which would leave customers' stock held and payments unreconciled for up to a day). Paying
-for a plan or starting a trial is the owner's decision. Everything that does not need Vercel was completed and verified
-above. No Vercel project, database or environment variable was created or changed; `velora-valley-v3` and Nitish's
-infrastructure were not touched; `main` is unchanged (`55aa848`); live payments remain disabled (no live keys anywhere).
+## Vercel scope (corrected 2026-11-22)
+An earlier version of this report said the account was on Hobby. That was wrong: it read `billing.plan` from the
+personal **user** record (`hobby`), not from the team that owns the projects. The deploying scope is the team
+**`devarchith-s-projects`** (`team_auKmjkfzNRCJAFGD5Men7gmo`): `billing.plan = "pro"`, status active, no trial, current
+period 2026-11-22 → 2026-12-25, role OWNER (`vercel api /v2/teams/team_auKmjkfzNRCJAFGD5Men7gmo`). It is the only
+scope the CLI can see and it holds the existing `velora-valley-v3` (not to be modified). Pro allows commercial use and
+per-minute crons, so the plan is not a blocker. The Vercel **MCP** connection still answers 403 for this team until the
+owner approves team access (`authorize_team_access` link); the CLI is signed in and is used meanwhile.
 
 ## Launch blockers (exact; each needs the owner)
-1. **Vercel plan.** The connected account (`devarchith5-1566`, scope `devarchith-s-projects`) is on **Hobby**
-   (checked 2026-11-22: `billing.plan = "hobby"`, no teams). Vercel's Terms §4: *"You shall only use the Services under
-   a Hobby plan for your personal or non-commercial use"* — an online store for Anantha Food Products is commercial.
-   Independently, Hobby cron jobs may run at most once a day and a more frequent expression **fails the deployment**
-   ("Hobby accounts are limited to daily cron jobs"); `vercel.json` needs `*/15` (payment-window expiry, releases held
-   stock), `7,22,37,52` (payment reconciliation) and `*/10` (email outbox). Making these daily would leave stock held
-   for up to a day and payments unreconciled for hours, so they were not weakened. **Resolution:** the owner upgrades
-   the account (or creates a Pro team) in the Vercel dashboard (Settings → Billing; Pro is a paid plan; a 14-day Pro
-   trial is offered on this account). Starting a trial or paying is the owner's decision and was not done by the agent.
-   The Vercel MCP connection also needs team access (`authorize_team_access`); the Vercel CLI is already signed in to
-   this account.
+1. (resolved) Vercel plan: the team scope is Pro, see above.
 2. **`main` promotion is unsafe.** The Vercel and Render GitHub apps receive every push to this repository, the
    original production project (`velora-valley.vercel.app`, owned by Nitish) is not visible from this account, and its
    Git connection and production branch are unknown (M11 `RELEASE.md` A0 questions 1-5 are still unanswered). Pushing
@@ -155,7 +146,17 @@ infrastructure were not touched; `main` is unchanged (`55aa848`); live payments 
    (ADR 0024), the owner's admin email (the owner chooses the password at `admin:bootstrap`), Razorpay **test** keys and
    test webhook secret for the staging payment run.
 
-## Owner runbook once blocker 1 is resolved (agent-executable after the owner's go-ahead)
+## Staging and production infrastructure (created 2026-11-22, team `devarchith-s-projects`, Pro)
+| Item | State | Evidence |
+|---|---|---|
+| Project `velora-valley-store` (`prj_CFO7y0MfsqcpQ5XKdSA76HIavIaH`) | created; **no Git connection** (deploys only when run explicitly, so no push can deploy it); Node 24.x; Next.js; region `sin1` from `vercel.json`; Vercel Authentication on all deployments | `vercel api /v9/projects/…` |
+| Staging DB `velora-staging` (Neon Free, `store_1EPOvQkW3IDfKGo8`, us-east-1) | connected to **Preview + Development only**; 15 migrations applied, `migrate diff` exit 0, `migrate status` up to date; catalogue seeded once explicitly (30 products / 40 variants); staging owner `staging-owner@velora-staging.invalid` (password generated locally, never printed) | guarded `db:migrate:deploy` with the staging hosts declared disposable |
+| Production DB `velora-production` (Neon Free, `store_GWgcfWoRXFdKCGv8`, ap-southeast-1 Singapore) | separate Neon project, connected to **Production only**; empty (not migrated) | `NEON_PROJECT_ID` differs from staging |
+| Env (Preview) | `PAYMENT_MODE=request_only`, `ADMIN_LEGACY_LOGIN=off`, `SESSION_SECRET`, `CRON_SECRET` (sensitive, generated), `PRODUCTION_DB_HOSTS` = production host; no `ADMIN_PASSWORD`; notify/OTP unset (no email provider) | `vercel env ls` (names only) |
+| Env (Production) | only the Neon variables and `PRODUCTION_DB_HOSTS` so far | |
+| Staging deployment | **not yet created**: `.claude/settings.json` denies `vercel deploy` to agents (deliberate rail), so the owner runs it: `cd ~/Developer/Velora-Valley-m12 && vercel deploy --scope devarchith-s-projects` (preview). After the owner reported running it, no deployment appeared within 10 minutes (`vercel ls velora-valley-store`) | |
+
+## Runbook (remaining steps)
 1. Vercel: new project `velora-valley-store` (framework Next.js, region `sin1`, Node 24, build `npm run vercel-build`,
    which never writes to the database), production branch = `backend/development` (not `main`), Preview deployments
    protected (Vercel Authentication).
