@@ -3,7 +3,7 @@
  * password is refused without a session; the correct one signs an OPERATIONS account in; that role sees its sections and
  * not Team, and the server refuses what it may not do; enquiries can be worked; the Operations tab carries the sales
  * summary; nothing overflows the phone screen; sign-out ends the session on the server.
- * Two admin sign-ins in total (the login limiter allows 8 per 15 minutes per IP for the whole run).
+ * Two admin sign-ins, from their own client address (the login limiter allows 8 per 15 minutes per IP).
  */
 import { expect, test } from "@playwright/test";
 import { adminApi, closeDb, db, hasOwner, must, stamp } from "./support/env";
@@ -25,7 +25,9 @@ test("operations staff on a phone: wrong password refused, own sections only, en
     await api.dispose();
   }
 
-  const ctx = await newContext(browser, MOBILE);
+  // This phone is a different client: its own address (as scripts/perf-check.ts does), so its two sign-ins use their own
+  // login-limiter bucket instead of the run-wide one the owner journey in admin.spec.ts depends on.
+  const ctx = await newContext(browser, { ...MOBILE, extraHTTPHeaders: { "x-forwarded-for": "198.51.100.77" } });
   const page = await ctx.newPage();
   const errs = watchErrors(page, "admin-mobile");
   const status = (url: string, method = "GET", body?: unknown) =>
