@@ -12,6 +12,7 @@ import { AdminLogin, AdminLogout, EnquiryStatus, OrderStatusSelect, RemoveTestDa
 import { ChangePasswordForm, SessionsTable, TeamManager } from "@/components/admin/AccountControls";
 import { TEST_ENQUIRY_WHERE, TEST_ORDER_WHERE, TEST_SUBSCRIBER_WHERE } from "@/lib/test-data";
 import { collectReadiness, listPaymentExceptions } from "@/lib/ops/readiness";
+import { salesSummary } from "@/lib/ops/sales-report";
 import { listLowStock } from "@/lib/inventory/adjust";
 import { OutboxRetryButton, StockEditor } from "@/components/admin/OrderOps";
 import { ShippingRuleActions, ShippingRuleForm, TaxRateForm } from "@/components/admin/SettingsControls";
@@ -252,11 +253,56 @@ type Admin = NonNullable<Awaited<ReturnType<typeof currentAdmin>>>;
 const STATUS_MARK = { ok: "✓", action: "•", blocker: "✗" } as const;
 const STATUS_STYLE = { ok: "text-leaf", action: "text-forest", blocker: "font-medium text-[#9b2c2c]" } as const;
 
-/** M11: launch readiness, money that needs a person, undeliverable notifications and low stock. Read-only except retries. */
+/** M11: launch readiness, money that needs a person, undeliverable notifications and low stock; M12: sales summary. Read-only except retries. */
 async function OperationsTab({ admin }: { admin: Admin }) {
-  const [report, exceptions, dead, low] = await Promise.all([collectReadiness(), listPaymentExceptions(), db.outboxMessage.findMany({ where: { status: "dead" }, orderBy: { createdAt: "desc" }, take: 50 }), listLowStock()]);
+  const [report, exceptions, dead, low, sales] = await Promise.all([collectReadiness(), listPaymentExceptions(), db.outboxMessage.findMany({ where: { status: "dead" }, orderBy: { createdAt: "desc" }, take: 50 }), listLowStock(), salesSummary()]);
   return (
     <div className="mt-6 space-y-10 text-[13px]">
+      <section aria-labelledby="h-sales">
+        <h2 id="h-sales" className="text-[15px] font-medium">
+          Sales
+        </h2>
+        <p className="mt-1 text-[12px] text-forest/60">Orders placed (not cancelled), by Indian calendar day. Collected = payment recorded as paid. Test orders are left out.</p>
+        <div className="overflow-x-auto">
+          <table className="mt-3 w-full min-w-[520px] text-left text-[12.5px]" data-testid="sales-table">
+            <thead className="text-[11px] uppercase tracking-wider text-forest/60">
+              <tr>
+                <th className="py-2 pr-3">Period</th>
+                <th className="py-2 pr-3">Orders</th>
+                <th className="py-2 pr-3">of which wholesale</th>
+                <th className="py-2 pr-3">Order value</th>
+                <th className="py-2 pr-3">Collected</th>
+                <th className="py-2">Cancelled</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-forest/10">
+              {sales.periods.map((p) => (
+                <tr key={p.key} data-period={p.key}>
+                  <td className="py-2 pr-3">{p.label}</td>
+                  <td className="py-2 pr-3" data-col="orders">{p.orders}</td>
+                  <td className="py-2 pr-3">{p.wholesaleOrders}</td>
+                  <td className="py-2 pr-3" data-col="value">{formatPrice(p.value)}</td>
+                  <td className="py-2 pr-3">{formatPrice(p.collected)}</td>
+                  <td className="py-2">{p.cancelled}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {sales.topProducts.length > 0 && (
+          <>
+            <h3 className="mt-4 text-[13px] font-medium">Top products this month</h3>
+            <ul className="mt-1 space-y-1" data-testid="top-products">
+              {sales.topProducts.map((t) => (
+                <li key={t.productName}>
+                  {t.productName} · {t.units} units · {formatPrice(t.value)}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </section>
+
       <section aria-labelledby="h-readiness">
         <h2 id="h-readiness" className="text-[15px] font-medium">
           Readiness <span className={`ml-2 text-[12px] uppercase tracking-wider ${STATUS_STYLE[report.overall]}`}>{report.overall}</span>

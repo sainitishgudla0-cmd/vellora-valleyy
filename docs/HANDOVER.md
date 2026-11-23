@@ -9,7 +9,7 @@ For the business owner and staff (M11 P7-T4). Technical operators: `RELEASE.md` 
 - Locked out as the only owner? **(operator)** `RELEASE.md` A1b "Owner recovery".
 
 ## Every morning (10 minutes)
-1. **Operations** tab, top section *Readiness*: anything marked ✗ needs attention today; • items are known open set-up work.
+1. **Operations** tab, top section *Sales* (M12): orders placed, order value, money collected and cancellations for today, the last 7 days and this month (Indian calendar days; test orders left out), plus the month's top products. Then *Readiness*: anything marked ✗ needs attention today; • items are known open set-up work.
 2. *Payments needing a person*:
    - "Customer charged, payment not applied: refund it" — the customer paid but the order had already expired or was cancelled. An owner opens the order and refunds the full amount (see *Refunds*).
    - "Awaiting reconciliation" — usually settles by itself within 15 minutes; if it stays for hours, tell the operator.

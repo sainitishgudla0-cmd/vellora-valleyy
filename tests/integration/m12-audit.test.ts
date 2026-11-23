@@ -332,3 +332,29 @@ describe("VA-06 sign-in codes: parallel requests cannot multiply live codes or e
     expect(await verifyOtp({ email, code, acceptTerms: true })).toMatchObject({ ok: true, created: true });
   });
 });
+
+describe("M12 admin reporting: sales summary", () => {
+  it("counts real orders by Indian day, separates collected money, and leaves out cancelled and test orders", async () => {
+    const { salesSummary, istDayStart, istMonthStart } = await import("@/lib/ops/sales-report");
+    // 2026-11-22 23:00 IST is 17:30 UTC the same day; 00:30 IST on the 23rd is 19:00 UTC on the 22nd
+    expect(istDayStart(new Date("2026-11-22T17:30:00Z")).toISOString()).toBe("2026-11-21T18:30:00.000Z");
+    expect(istDayStart(new Date("2026-11-22T19:00:00Z")).toISOString()).toBe("2026-11-22T18:30:00.000Z");
+    expect(istMonthStart(new Date("2026-11-30T19:00:00Z")).toISOString()).toBe("2026-11-30T18:30:00.000Z"); // already 1 Dec in India
+    const before = await salesSummary();
+    const real = { customerName: "Sales Fixture", email: freshEmail("sales") };
+    const a = await read(await createOrderRoute(mk("/api/orders", "POST", undefined, retailBody(variantId, { ...real, items: [{ variantId, quantity: 2 }] }))));
+    const b = await read(await createOrderRoute(mk("/api/orders", "POST", undefined, retailBody(variantId, { ...real, email: freshEmail("sales") }))));
+    const c = await read(await createOrderRoute(mk("/api/orders", "POST", undefined, retailBody(variantId, { ...real, email: freshEmail("sales") }))));
+    await read(await createOrderRoute(mk("/api/orders", "POST", undefined, retailBody(variantId)))); // SMOKE TEST: never counted
+    await db.order.update({ where: { number: b.body.order.number }, data: { paymentStatus: "paid", status: "paid" } });
+    await db.order.update({ where: { number: c.body.order.number }, data: { status: "cancelled" } });
+    const after = await salesSummary();
+    const d = (k: string) => {
+      const x = after.periods.find((p) => p.key === k)!;
+      const y = before.periods.find((p) => p.key === k)!;
+      return { orders: x.orders - y.orders, value: x.value - y.value, collected: x.collected - y.collected, cancelled: x.cancelled - y.cancelled };
+    };
+    for (const k of ["today", "last7", "month"]) expect(d(k)).toEqual({ orders: 2, value: a.body.order.total + b.body.order.total, collected: b.body.order.total, cancelled: 1 });
+    await db.order.deleteMany({ where: { customerName: "Sales Fixture" } });
+  });
+});

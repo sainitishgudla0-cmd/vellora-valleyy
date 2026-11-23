@@ -78,6 +78,22 @@ proxies. Unchanged, documented in ADR 0025.
 **M12-A01 (new).** Money columns are INT4 paise. A wholesale order of 1,000 × ₹50,000 (5e9 paise) failed the insert and
 returned **500**; quote pricing likewise. Fix: refuse with `422` before writing.
 
+## Admin portal acceptance (M12 release step 2)
+| Requirement | Where | Verified by |
+|---|---|---|
+| Staff email/password login, wrong password refused without a session | `/admin` | `admin-portal.spec.ts` (phone), `admin.spec.ts`, `admin-auth.test.ts` |
+| Individual accounts, roles, permissions enforced by the server | Team tab; `requireAdmin` on every route | `admin.spec.ts` (viewer), `admin-portal.spec.ts` (operations: no Team, 403 on users/tax/refunds), role × route matrix in `admin-users.test.ts` |
+| Owner authentication and recovery | owner role; `admin:bootstrap --reset` (RELEASE A1b) | `admin-users.test.ts`, `legacy-admin.test.ts` |
+| Products and inventory | Products tab (price, availability, stock tracking/adjust) | `admin-operations.spec.ts`, `admin-inventory.test.ts` |
+| Orders and permitted payment actions | Orders tab, order page | `admin-operations.spec.ts`, `admin-orders.test.ts`, `offline-payments.test.ts`, `refunds.test.ts` |
+| Enquiries | Enquiries tab (status) | `admin-portal.spec.ts` |
+| Wholesale operations | Wholesale tab | `admin-operations.spec.ts`, `wholesale-admin.test.ts` |
+| Reporting | Operations tab: **Sales summary (added in M12)**, readiness, payment exceptions, failed notifications, low stock | `m12-audit.test.ts` (sales), `admin-portal.spec.ts`, `ops-readiness.test.ts` |
+| Logout and session management | Sign out; Account tab sessions; Team (others' sessions) | `admin-portal.spec.ts`, `admin.spec.ts` |
+| Mobile usability | 390 px: login, dashboard, operations fit; every tab reachable | `admin-portal.spec.ts` |
+Gap found and closed: there was no sales reporting (only operational checks). `src/lib/ops/sales-report.ts` + the *Sales*
+section (read-only, `admin:read`, same styles as the existing tab). Storefront untouched.
+
 ## Other areas inspected (no defect found)
 Order/payment state machine and admin order edits; `/verify` (signature before any write, server-side capture lookup,
 amount/currency/mode checks); webhook (raw-body HMAC, dedupe, orphan captures); refunds (owner-only, row lock,
