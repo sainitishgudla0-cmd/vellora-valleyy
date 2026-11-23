@@ -131,8 +131,9 @@ security headers; `npm audit` 0.
 | Local gates | done | see "Tests and evidence" |
 | CI on `backend/m12-audit-fixes` @ `8ed5b3f` | **green** | run 45073494195 (https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/45073494195): checks; migrate + integration + build + smoke 70/0 + browser 38 passed / 22 visual skipped; `visual` job 22/22 identical to approved `1aefdd8` |
 | Integration into `backend/development` | **done** | fast-forward `0ec05ea..8ed5b3f` (no concurrent commits, no merge commit, no force push); CI run 45074396960 green, all three jobs (https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/45074396960) |
-| `main` promotion | **not done — unsafe** | "Launch blockers" 2 |
-| Vercel staging / production | in progress under `devarchith-s-projects` (Pro) | "Staging" below |
+| `main` promotion | **prepared, not executed**: agent pushes to `main` are refused (CLAUDE.md rule 1 + the session's permission classifier); owner command below. Verified on GitHub 2026-11-23: `main` = `55aa848` | "Launch blockers" 2 |
+| Vercel staging / production | infrastructure ready; **no deployment exists** (`vercel deploy` is denied to agents by `.claude/settings.json`; owner command below) | "Staging and production infrastructure" |
+| Release candidate | `backend/development` = `backend/m12-audit-fixes` = **`39eff03`**; CI green: run 45103950272 (branch) and 45104929932 (`backend/development`), smoke 70/0, browser 39 passed / 22 visual skipped, visual job 22/22 identical | https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/45104929932 |
 
 ## Vercel scope (corrected 2026-11-22)
 An earlier version of this report said the account was on Hobby. That was wrong: it read `billing.plan` from the
@@ -175,6 +176,16 @@ owner approves team access (`authorize_team_access` link); the CLI is signed in 
 | Env (Preview) | `PAYMENT_MODE=request_only`, `ADMIN_LEGACY_LOGIN=off`, `SESSION_SECRET`, `CRON_SECRET` (sensitive, generated), `PRODUCTION_DB_HOSTS` = production host; no `ADMIN_PASSWORD`; notify/OTP unset (no email provider) | `vercel env ls` (names only) |
 | Env (Production) | only the Neon variables and `PRODUCTION_DB_HOSTS` so far | |
 | Staging deployment | **not yet created**: `.claude/settings.json` denies `vercel deploy` to agents (deliberate rail), so the owner runs it: `cd ~/Developer/Velora-Valley-m12 && vercel deploy --scope devarchith-s-projects` (preview). After the owner reported running it, no deployment appeared within 10 minutes (`vercel ls velora-valley-store`) | |
+
+## Owner commands (exact; each refused to the agent by repository safety rules)
+1. Staging deploy (Preview, not production), from the worktree linked to `velora-valley-store`:
+   `cd ~/Developer/Velora-Valley-m12 && vercel deploy --scope devarchith-s-projects`
+2. Promote `main` (fast-forward to the CI-green release; refuses if `main` moved):
+   `cd ~/Developer/Velora-Valley-m12 && git fetch origin && test "$(git rev-parse origin/main)" = 55aa848180c4ba202a488c85d7d24526e2e1cc4e && git merge-base --is-ancestor origin/main 39eff033f00c496bb2794a6437d6a8cbd8c5e0ac && git push origin 39eff033f00c496bb2794a6437d6a8cbd8c5e0ac:refs/heads/main`
+3. After staging acceptance passes: production migrations are also denied to the agent
+   (`db:migrate:deploy:production`); the owner runs them with `APP_ENV=production CONFIRM_PRODUCTION_DB_HOST=ep-proud-bread-azqtrw6g.c-3.ap-southeast-1.aws.neon.tech`.
+State verified after the owner reported running 1 and 2 (2026-11-23): `main` still `55aa848` on GitHub, no deployment
+in `velora-valley-store`. Neither took effect; the outputs were not available to the agent.
 
 ## Runbook (remaining steps)
 1. Vercel: new project `velora-valley-store` (framework Next.js, region `sin1`, Node 24, build `npm run vercel-build`,
