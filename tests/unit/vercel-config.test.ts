@@ -7,7 +7,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const root = path.resolve(__dirname, "../..");
-const vercel = JSON.parse(fs.readFileSync(path.join(root, "vercel.json"), "utf8")) as { buildCommand: string; crons?: { path: string; schedule: string }[] };
+const vercel = JSON.parse(fs.readFileSync(path.join(root, "vercel.json"), "utf8")) as { buildCommand: string; crons?: { path: string; schedule: string }[]; git?: { deploymentEnabled?: unknown } };
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as { scripts: Record<string, string> };
 
 /** Expands `npm run <x>` references so the check sees the whole command the build runs. */
@@ -48,5 +48,13 @@ describe("scheduled jobs (F13)", () => {
       expect(src, c.path).toMatch(/CRON_SECRET/);
       expect(src, c.path).toMatch(/safeEqual\(/);
     }
+  });
+});
+
+describe("no Git-triggered deployments (M12 main promotion)", () => {
+  // Any Vercel project connected to this repository through Git (including one owned by someone else) must not build a
+  // push: deployments are made explicitly with the CLI from a verified commit (docs/M12-INDEPENDENT-AUDIT.md).
+  it("git.deploymentEnabled is false for every branch", () => {
+    expect(vercel.git?.deploymentEnabled).toBe(false);
   });
 });

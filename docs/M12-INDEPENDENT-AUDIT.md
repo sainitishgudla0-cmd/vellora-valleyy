@@ -145,14 +145,18 @@ owner approves team access (`authorize_team_access` link); the CLI is signed in 
 
 ## Launch blockers (exact; each needs the owner)
 1. (resolved) Vercel plan: the team scope is Pro, see above.
-2. **`main` promotion is unsafe.** The Vercel and Render GitHub apps receive every push to this repository, the
-   original production project (`velora-valley.vercel.app`, owned by Nitish) is not visible from this account, and its
-   Git connection and production branch are unknown (M11 `RELEASE.md` A0 questions 1-5 are still unanswered). Pushing
-   this code to `main` could build that project against its production database, which has none of the backend
-   migrations (M11 F22: no compatible overlap), i.e. a broken live site. `main` stays at `55aa848`. Not needed for a NEW
-   project: it can deploy `backend/development` (or a release branch) as its production branch, or via the CLI.
-   The account's existing project `velora-valley-v3` is linked to a different repository (`devarchith/velora-valley-v3`)
-   and has no environment variables; it was left untouched.
+2. **`main` promotion preflight (2026-11-22, owner-authorised).** Evidence that no external deployment builds from
+   this repository: across ~2 weeks of pushes (72 commits on `backend/**`) and on `main`'s own commit, the Vercel and
+   Render GitHub apps have only ever created empty queued check suites (0 check runs); the repository has **no**
+   GitHub deployments, no environments and no commit statuses. A Git-connected Vercel project creates GitHub
+   deployments for every push, and a Render auto-deploy reports a check, so neither appears to be linked. Webhooks
+   cannot be listed (needs repo admin). Isolation added anyway, from the repository side: `vercel.json`
+   `"git": { "deploymentEnabled": false }` (Vercel creates no Git-triggered deployment for ANY project connected to this
+   repository, whatever its dashboard build command; pinned by `tests/unit/vercel-config.test.ts`), and the head commit
+   message carries `[skip render]` / `[skip deploy]` (Render's documented skip phrases). The new project deploys only
+   through the CLI. Builds never write to a database (`vercel-build` = env gate + `prisma generate` + `next build`).
+   Residual risk: a Render service with auto-deploy whose skip handling ignores the head commit (Render's docs do not
+   say which commit of a multi-commit push is checked); no Render activity has ever been reported on this repository.
 3. **Database.** A new Neon Postgres (Vercel Marketplace) per environment: staging and production on separate
    projects or branches; production on a plan with point-in-time restore. Creating it accepts the provider's terms and
    picks a (possibly paid) plan; it waits on blocker 1 (the database is attached to the new Vercel project).

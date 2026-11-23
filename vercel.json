@@ -4,6 +4,7 @@
   "buildCommand": "npm run vercel-build",
   "installCommand": "npm install",
   "regions": ["sin1"],
+  "git": { "deploymentEnabled": false },
   "crons": [
     { "path": "/api/internal/orders/expire", "schedule": "*/15 * * * *" },
     { "path": "/api/internal/payments/reconcile", "schedule": "7,22,37,52 * * * *" },
