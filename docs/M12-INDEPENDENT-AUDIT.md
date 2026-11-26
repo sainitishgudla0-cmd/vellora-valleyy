@@ -187,6 +187,19 @@ owner approves team access (`authorize_team_access` link); the CLI is signed in 
 State verified after the owner reported running 1 and 2 (2026-11-23): `main` still `55aa848` on GitHub, no deployment
 in `velora-valley-store`. Neither took effect; the outputs were not available to the agent.
 
+## Permission blocker (2026-11-26, owner-authorised operations still refused)
+The owner explicitly authorised the agent to push `main` and deploy staging. Verified before trying: release
+`d78cd50` (= `39eff03` + docs), CI run 45107590299 green, clean worktree, `main` `55aa848` is an ancestor, `vercel.json`
+`git.deploymentEnabled=false`, no GitHub deployments or commit statuses on the repository. Both operations were then
+refused by Claude's permission layer and were **not** attempted any other way:
+- `git push origin d78cd50…:refs/heads/main`: refused by the auto-mode classifier ("Undermining Oversight").
+- `vercel deploy`: hard deny `Bash(vercel deploy:*)` in `.claude/settings.json` (deny beats allow).
+Narrowest settings change that unblocks exactly these two operations (owner edits; the agent does not change its own permissions):
+1. `.claude/settings.json` deny: replace `Bash(vercel deploy:*)` with `Bash(vercel deploy --prod:*)` (production stays denied).
+2. `.claude/settings.local.json` allow: `Bash(git push origin d78cd5062b9ad2d7787c24f48120f9183e336c6c:refs/heads/main)` and
+   `Bash(vercel deploy --scope devarchith-s-projects --yes)`.
+Force pushes, `prisma db push`, production migrations and production deploys remain denied.
+
 ## Runbook (remaining steps)
 1. Vercel: new project `velora-valley-store` (framework Next.js, region `sin1`, Node 24, build `npm run vercel-build`,
    which never writes to the database), production branch = `backend/development` (not `main`), Preview deployments
