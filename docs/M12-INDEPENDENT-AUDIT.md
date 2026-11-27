@@ -237,6 +237,9 @@ suspended mid-checkout is refused.
 | Production DB | `velora-production`: separate, empty, not migrated (production migrations are owner-run) |
 | Payments | `PAYMENT_MODE=request_only` everywhere; no Razorpay keys exist (test or live); live payments disabled |
 
+| Restore drill (2026-11-26) | **passed** on a disposable local Postgres 16 (`npm run db:restore-drill`, release `5965a36`): 36 tables, 85 rows, row counts + checksums equal, 15 migrations recorded, constraints and indexes equal, `migrate status` up to date, no drift; dump 0.1 s, restore 0.2 s. Rehearsal only: production RTO is the provider's restore time (Neon PITR, `RUNBOOK-DATABASE.md`) |
+| Migration rehearsal (2026-11-26) | **passed** (`npm run db:baseline-rehearsal`, disposable): fresh deploy of all 15 migrations, schema diff none; a bad legacy value stops the release with the table untouched; `resolve --rolled-back` + redeploy recovers |
+
 Not done, and why (exact blockers, in order):
 1. **Staging deploy** — refused by the `.claude/settings.json` deny (change above). Staging acceptance (storefront,
    `/admin` roles, health, checkout, mobile) and the restore drill run immediately after it.
