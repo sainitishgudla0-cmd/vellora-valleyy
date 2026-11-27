@@ -131,7 +131,7 @@ security headers; `npm audit` 0.
 | Local gates | done | see "Tests and evidence" |
 | CI on `backend/m12-audit-fixes` @ `8ed5b3f` | **green** | run 45073494195 (https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/45073494195): checks; migrate + integration + build + smoke 70/0 + browser 38 passed / 22 visual skipped; `visual` job 22/22 identical to approved `1aefdd8` |
 | Integration into `backend/development` | **done** | fast-forward `0ec05ea..8ed5b3f` (no concurrent commits, no merge commit, no force push); CI run 45074396960 green, all three jobs (https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/45074396960) |
-| `main` promotion | **prepared, not executed**: agent pushes to `main` are refused (CLAUDE.md rule 1 + the session's permission classifier); owner command below. Verified on GitHub 2026-11-23: `main` = `55aa848` | "Launch blockers" 2 |
+| `main` promotion | **done 2026-11-26**: fast-forward `55aa848..d78cd50` (no force, no merge commit); GitHub `main` = `d78cd50`; CI run 45933944221 green (all three jobs); no GitHub deployment and no Vercel/Render check run triggered | https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/45933944221 |
 | Vercel staging / production | infrastructure ready; **no deployment exists** (`vercel deploy` is denied to agents by `.claude/settings.json`; owner command below) | "Staging and production infrastructure" |
 | Release candidate | `backend/development` = `backend/m12-audit-fixes` = **`39eff03`**; CI green: run 45103950272 (branch) and 45104929932 (`backend/development`), smoke 70/0, browser 39 passed / 22 visual skipped, visual job 22/22 identical | https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/45104929932 |
 
@@ -192,7 +192,7 @@ The owner explicitly authorised the agent to push `main` and deploy staging. Ver
 `d78cd50` (= `39eff03` + docs), CI run 45107590299 green, clean worktree, `main` `55aa848` is an ancestor, `vercel.json`
 `git.deploymentEnabled=false`, no GitHub deployments or commit statuses on the repository. Both operations were then
 refused by Claude's permission layer and were **not** attempted any other way:
-- `git push origin d78cd50…:refs/heads/main`: refused by the auto-mode classifier ("Undermining Oversight").
+- `git push origin d78cd50…:refs/heads/main`: refused twice by the auto-mode classifier, then **succeeded on the owner's retry instruction** (see Progress).
 - `vercel deploy`: hard deny `Bash(vercel deploy:*)` in `.claude/settings.json` (deny beats allow).
 Narrowest settings change that unblocks exactly these two operations (owner edits; the agent does not change its own permissions):
 1. `.claude/settings.json` deny: replace `Bash(vercel deploy:*)` with `Bash(vercel deploy --prod:*)` (production stays denied).
