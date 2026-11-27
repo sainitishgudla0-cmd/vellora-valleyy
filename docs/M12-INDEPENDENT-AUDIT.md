@@ -132,7 +132,7 @@ security headers; `npm audit` 0.
 | CI on `backend/m12-audit-fixes` @ `8ed5b3f` | **green** | run 45073494195 (https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/45073494195): checks; migrate + integration + build + smoke 70/0 + browser 38 passed / 22 visual skipped; `visual` job 22/22 identical to approved `1aefdd8` |
 | Integration into `backend/development` | **done** | fast-forward `0ec05ea..8ed5b3f` (no concurrent commits, no merge commit, no force push); CI run 45074396960 green, all three jobs (https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/45074396960) |
 | `main` promotion | **done 2026-11-26**: fast-forward `55aa848..d78cd50` (no force, no merge commit); GitHub `main` = `d78cd50`; CI run 45933944221 green (all three jobs); no GitHub deployment and no Vercel/Render check run triggered | https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/45933944221 |
-| Vercel staging / production | infrastructure ready; **no deployment exists** (`vercel deploy` is denied to agents by `.claude/settings.json`; owner command below) | "Staging and production infrastructure" |
+| Vercel staging / production | infrastructure ready; **no deployment exists** (`vercel deploy` still denied by `.claude/settings.json`, re-checked 2026-11-26; see "Final status") | "Staging and production infrastructure" |
 | Release candidate | `backend/development` = `backend/m12-audit-fixes` = **`39eff03`**; CI green: run 45103950272 (branch) and 45104929932 (`backend/development`), smoke 70/0, browser 39 passed / 22 visual skipped, visual job 22/22 identical | https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/45104929932 |
 
 ## Vercel scope (corrected 2026-11-22)
@@ -194,10 +194,11 @@ The owner explicitly authorised the agent to push `main` and deploy staging. Ver
 refused by Claude's permission layer and were **not** attempted any other way:
 - `git push origin d78cd50…:refs/heads/main`: refused twice by the auto-mode classifier, then **succeeded on the owner's retry instruction** (see Progress).
 - `vercel deploy`: hard deny `Bash(vercel deploy:*)` in `.claude/settings.json` (deny beats allow).
-Narrowest settings change that unblocks exactly these two operations (owner edits; the agent does not change its own permissions):
-1. `.claude/settings.json` deny: replace `Bash(vercel deploy:*)` with `Bash(vercel deploy --prod:*)` (production stays denied).
-2. `.claude/settings.local.json` allow: `Bash(git push origin d78cd5062b9ad2d7787c24f48120f9183e336c6c:refs/heads/main)` and
-   `Bash(vercel deploy --scope devarchith-s-projects --yes)`.
+Only `vercel deploy` is still blocked (re-checked 2026-11-26: both `~/Developer/Velora-Valley/.claude/settings.json`
+and `~/Developer/Velora-Valley-m12/.claude/settings.json` still contain the broad deny). Narrowest settings change that
+unblocks exactly the staging deploy (owner edits, in **both** files; the agent does not change its own permissions):
+1. `permissions.deny`: replace `Bash(vercel deploy:*)` with `Bash(vercel deploy --prod:*)` (production stays denied).
+2. `permissions.allow`: add `Bash(vercel deploy --scope devarchith-s-projects --yes)` (preview only).
 Force pushes, `prisma db push`, production migrations and production deploys remain denied.
 
 ## Runbook (remaining steps)
@@ -224,3 +225,26 @@ changes staff will notice: an admin account change with a weak new password now 
 price-list, price, MOQ and wholesale-terms edits fail visibly (and change nothing) if they cannot be recorded in the
 activity log; invoices show names typed in Telugu/Hindi/Tamil etc. in Latin letters; a wholesale buyer whose account is
 suspended mid-checkout is refused.
+
+## Final status (2026-11-26) — stopped at the documented blockers
+| Item | State |
+|---|---|
+| Defects | VA-01..VA-07 confirmed and fixed, VA-08 partly confirmed and fixed, M12-A01 found and fixed; each with a regression test (`tests/integration/m12-audit.test.ts`, `tests/unit/m12-audit.test.ts`, `tests/e2e/admin-portal.spec.ts`) |
+| Git | release code `39eff03`; `main` = `d78cd50` (fast-forward, no force); `backend/development` = `backend/m12-audit-fixes` (this docs commit) |
+| CI | `main`: https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/45933944221 (green); release branch: https://github.com/sainitishgudla0-cmd/vellora-valleyy/actions/runs/45103950272 (green; smoke 70/0, browser 39 passed / 22 visual skipped, visual 22/22 identical) |
+| Deployed URLs | **none**: no staging or production deployment exists. Nothing was deployed by any other means |
+| Staging DB | `velora-staging`: migrated (15), schema diff clean, seeded catalogue, staging owner created |
+| Production DB | `velora-production`: separate, empty, not migrated (production migrations are owner-run) |
+| Payments | `PAYMENT_MODE=request_only` everywhere; no Razorpay keys exist (test or live); live payments disabled |
+
+Not done, and why (exact blockers, in order):
+1. **Staging deploy** — refused by the `.claude/settings.json` deny (change above). Staging acceptance (storefront,
+   `/admin` roles, health, checkout, mobile) and the restore drill run immediately after it.
+2. **Razorpay TEST run** — needs the owner's Razorpay test key id, key secret and webhook secret in Preview env.
+3. **Production** — needs, from the owner/accountant: email provider + sender domain (`SMTP_URL`, `EMAIL_FROM`), GST
+   rates per HSN and `SELLER_GSTIN`, opening stock counts, shipping rules, the owner's admin email; then Neon PITR /
+   backup plan on the production project, owner-run production migrations, `admin:bootstrap`, and a passed staging run.
+
+Remaining risks: Render auto-deploy skip handling (blocker 2 in "Launch blockers"); Neon Free on both databases has
+limited restore history until the production project is upgraded; customer OTP sign-in and order emails are off
+until the email provider is configured.
